@@ -88,7 +88,6 @@ feature_labels = {
 # --- Sidebar for User Input ---
 st.sidebar.header("User Data Input")
 st.sidebar.markdown("Enter values for the model's 21 features to get a prediction.")
-st.sidebar.markdown("Use the input boxes or the `+` and `-` buttons to change the values below.")
 
 
 # Dictionary to map user-friendly labels to numerical values for the model
@@ -109,32 +108,39 @@ st.sidebar.subheader("Demographic & Lifestyle")
 
 # Use selectbox and radio for features with a clear list of options
 user_inputs['RIAGENDR'] = st.sidebar.selectbox('Gender', options=list(gender_options.keys()))
+user_inputs['RIDAGEYR'] = st.sidebar.slider('Age in years', 18, 100, 30)
 user_inputs['RIDRETH3'] = st.sidebar.selectbox('Race/Ethnicity', options=list(race_options.keys()))
+user_inputs['INDFMPIR'] = st.sidebar.slider(
+    'Family income ratio', 0.0, 5.0, 1.0, step=0.1,
+    help="A value of 1.0 represents the poverty line. A value of 2.0 is twice the poverty line."
+)
 user_inputs['Is_Smoker_Cat'] = st.sidebar.radio('Smoking status', options=list(smoking_options.keys()))
 user_inputs['SLD012'] = st.sidebar.selectbox('Sleep Disorder Status', options=list(sleep_disorder_options.keys()))
+user_inputs['SLQ050'] = st.sidebar.number_input('Sleep duration (hours/day)', step=0.5, value=8.0)
+user_inputs['SLQ120'] = st.sidebar.number_input('Work schedule duration (hours)', step=1, value=8)
 
 st.sidebar.divider()
-st.sidebar.subheader("Health Metrics")
+st.sidebar.subheader("Alcohol & Physical Activity")
 
-# Use number_input for the remaining numerical features
-for feature in feature_names:
-    if feature not in ['RIAGENDR', 'RIDRETH3', 'Is_Smoker_Cat', 'SLD012']:
-        label = feature_labels.get(feature, feature)
-        
-        help_text = None
-        # Add a tooltip for the family income ratio to make it more intuitive
-        if feature == 'INDFMPIR':
-            help_text = "A value of 1.0 represents the poverty line. A value of 2.0 is twice the poverty line, and so on."
-        # Add a tooltip for alcohol drinks/day to make it more intuitive
-        elif feature == 'ALQ121':
-            help_text = "A standard drink is defined as 14g of pure alcohol (e.g., 12 oz beer, 5 oz wine, or 1.5 oz distilled spirits)."
+user_inputs['ALQ111'] = st.sidebar.number_input('Alcohol consumption (days/week)', min_value=0, max_value=7, step=1, value=0)
+user_inputs['ALQ121'] = st.sidebar.number_input('Alcohol drinks per day', min_value=0, max_value=50, step=1, value=0,
+                                                help="A standard drink is 14g of pure alcohol (e.g., 12oz beer, 5oz wine, 1.5oz spirits).")
+user_inputs['ALQ142'] = st.sidebar.number_input('Number of days drank in the past year', min_value=0, max_value=365, step=1, value=0)
+user_inputs['ALQ151'] = st.sidebar.number_input('Max number of drinks on any single day', min_value=0, max_value=50, step=1, value=0)
+user_inputs['ALQ170'] = st.sidebar.number_input('Alcohol intake frequency (drinks/day)', min_value=0, step=1, value=0)
+user_inputs['PAQ620'] = st.sidebar.number_input('Physical activity (minutes/day)', min_value=0, step=15, value=30)
 
-        user_inputs[feature] = st.sidebar.number_input(
-            f'Input for {label}',
-            step=0.1,
-            value=0.0,
-            help=help_text
-        )
+st.sidebar.divider()
+st.sidebar.subheader("Nutritional Information")
+
+user_inputs['DR1TKCAL'] = st.sidebar.number_input('Total calorie intake (kcal)', min_value=0, step=100, value=2000,
+                                                   help="Estimate your daily total calories.")
+user_inputs['DR1TPROT'] = st.sidebar.number_input('Total protein intake (grams)', min_value=0, step=1, value=60)
+user_inputs['DR1TCARB'] = st.sidebar.number_input('Total carbohydrate intake (grams)', min_value=0, step=1, value=250)
+user_inputs['DR1TSUGR'] = st.sidebar.number_input('Total sugar intake (grams)', min_value=0, step=1, value=40)
+user_inputs['DR1TFIBE'] = st.sidebar.number_input('Total fiber intake (grams)', min_value=0, step=1, value=30)
+user_inputs['DR1TTFAT'] = st.sidebar.number_input('Total fat intake (grams)', min_value=0, step=1, value=70)
+user_inputs['BMXBMI'] = st.sidebar.number_input('BMI', step=0.1, value=25.0, help="Body Mass Index")
 
 # Map the selected string options back to the numerical values the model expects
 final_inputs = {
