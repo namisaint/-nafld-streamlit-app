@@ -60,18 +60,48 @@ feature_names = [
     'DR1TPROT', 'DR1TCARB', 'DR1TSUGR', 'DR1TFIBE', 'DR1TTFAT', 'PAQ620', 'BMXBMI'
 ]
 
-
 # --- Sidebar for User Input ---
 st.sidebar.header("User Data Input")
 st.sidebar.markdown("Enter values for the model's 21 features to get a prediction.")
+# Added a new line to explain the plus and minus buttons
+st.sidebar.markdown("Use the `+` and `-` buttons or type in a number to change the values below.")
+
+
+# Dictionary to map technical feature names to human-readable labels
+# This makes the user interface much clearer.
+feature_labels = {
+    'RIAGENDR': 'Gender',
+    'RIDAGEYR': 'Age in years',
+    'RIDRETH3': 'Race/Ethnicity',
+    'INDFMPIR': 'Family income ratio',
+    'ALQ111': 'Alcohol consumption (days/week)',
+    'ALQ121': 'Alcohol drinks/day',
+    'ALQ142': 'Number of days drank in the past year',
+    'ALQ151': 'Number of drinks per day',
+    'ALQ170': 'Alcohol intake frequency',
+    'Is_Smoker_Cat': 'Smoking status',
+    'SLQ050': 'Sleep duration (hours/day)',
+    'SLQ120': 'Work schedule duration (hours)',
+    'SLD012': 'Sleep disorder status',
+    'DR1TKCAL': 'Total calorie intake (kcal)',
+    'DR1TPROT': 'Total protein intake (g)',
+    'DR1TCARB': 'Total carbohydrate intake (g)',
+    'DR1TSUGR': 'Total sugar intake (g)',
+    'DR1TFIBE': 'Total fiber intake (g)',
+    'DR1TTFAT': 'Total fat intake (g)',
+    'PAQ620': 'Physical activity (minutes/day)',
+    'BMXBMI': 'BMI'
+}
 
 # Dictionary to hold the user inputs
 user_inputs = {}
 
 # Loop to create an input widget for each feature in the sidebar
 for feature in feature_names:
+    # Use the human-readable label for the UI, but the technical name for the dictionary key
+    label = feature_labels.get(feature, feature)
     user_inputs[feature] = st.sidebar.number_input(
-        f'Input for {feature}',
+        f'Input for {label}',
         step=0.1,
         value=0.0  # Set a default value
     )
