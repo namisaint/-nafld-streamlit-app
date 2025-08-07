@@ -121,21 +121,20 @@ for feature in feature_names:
     if feature not in ['RIAGENDR', 'RIDRETH3', 'Is_Smoker_Cat', 'SLD012']:
         label = feature_labels.get(feature, feature)
         
+        help_text = None
         # Add a tooltip for the family income ratio to make it more intuitive
         if feature == 'INDFMPIR':
             help_text = "A value of 1.0 represents the poverty line. A value of 2.0 is twice the poverty line, and so on."
-            user_inputs[feature] = st.sidebar.number_input(
-                f'Input for {label}',
-                step=0.1,
-                value=0.0,
-                help=help_text
-            )
-        else:
-            user_inputs[feature] = st.sidebar.number_input(
-                f'Input for {label}',
-                step=0.1,
-                value=0.0
-            )
+        # Add a tooltip for alcohol drinks/day to make it more intuitive
+        elif feature == 'ALQ121':
+            help_text = "A standard drink is defined as 14g of pure alcohol (e.g., 12 oz beer, 5 oz wine, or 1.5 oz distilled spirits)."
+
+        user_inputs[feature] = st.sidebar.number_input(
+            f'Input for {label}',
+            step=0.1,
+            value=0.0,
+            help=help_text
+        )
 
 # Map the selected string options back to the numerical values the model expects
 final_inputs = {
