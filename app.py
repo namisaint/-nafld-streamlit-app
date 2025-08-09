@@ -12,7 +12,7 @@ import certifi
 # --- App Configuration ---
 st.set_page_config(
     page_title="Dissertation Model Predictor",
-    page_icon="🤖",
+    page_icon="�",
     layout="wide"
 )
 
@@ -229,3 +229,4 @@ if st.button('Show Saved Predictions Analysis'):
         st.error("Cannot retrieve predictions. Not connected to MongoDB.")
 
 st.info("To make this code work, you must install the Plotly library (`pip install plotly`), the certifi library (`pip install certifi`), and you must set up your MongoDB connection string in Streamlit Secrets.")
+�
