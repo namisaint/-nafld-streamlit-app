@@ -17,12 +17,15 @@ st.set_page_config(
 )
 
 # --- MongoDB Connection ---
-# The connection string is the address of your database.
-# YOU MUST REPLACE THIS PLACEHOLDER with your own MongoDB Atlas connection string.
-# A best practice is to store this as a Streamlit secret, not hardcode it.
-MONGODB_CONNECTION_STRING = "mongodb+srv://namithastl:hFzEVs2hXecRX0p3@nafld-app.cvmvo5c.mongodb.net/?retryWrites=true&w=majority&appName=NAFLD-APP"
-DB_NAME = "nafld_predictions_db"
-COLLECTION_NAME = "predictions"
+# The connection string is now read securely from st.secrets.
+# NEVER hardcode passwords or connection strings in your app.py file.
+try:
+    MONGODB_CONNECTION_STRING = st.secrets["mongo"]["connection_string"]
+    DB_NAME = st.secrets["mongo"]["db_name"]
+    COLLECTION_NAME = st.secrets["mongo"]["collection_name"]
+except KeyError:
+    st.error("MongoDB secrets are not configured. Please add your credentials to the Streamlit secrets.")
+    st.stop()
 
 @st.cache_resource
 def get_mongo_client():
