@@ -5,9 +5,8 @@ import joblib
 import os
 with st.sidebar:
     st.header("🍃 MongoDB Connection")
-    if cs == "":
-        cs = st.text_input("Connection String", type="password", key="mongo_uri_input")
-    dbn = st.text_input("Database Name", value=dbn, key="mongo_db_name_input")
+    cs = st.text_input("Connection String", value = cs_default, type = "password", key = "mongo_uri_input")
+    dbn = st.text_input("Database Name", value = dbn_default, key = "mongo_db_name_input")
     if st.button("Connect"):
         try:
             client = MongoClient(cs, tls = True, tlsCAFile = certifi.where())
@@ -18,10 +17,9 @@ with st.sidebar:
         except Exception as e:
             st.error("Mongo connection failed: " + str(e))
 
-    # Quick Test to create a collection
     if "mongo_db" in st.session_state:
         st.subheader("Quick Test")
-        q_coll = st.text_input("Test collection name", value="predictions", key="test_coll_name")
+        q_coll = st.text_input("Test collection name", value = "predictions", key = "test_coll_name")
         if st.button("Insert test doc"):
             try:
                 res = st.session_state["mongo_db"][q_coll].insert_one({
