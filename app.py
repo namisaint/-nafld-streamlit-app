@@ -7,7 +7,8 @@ with st.sidebar:
     st.header("🍃 MongoDB Connection")
     cs = st.text_input("Connection String", value = cs_default, type = "password", key = "mongo_uri_input")
     dbn = st.text_input("Database Name", value = dbn_default, key = "mongo_db_name_input")
-    if st.button("Connect"):
+
+    if st.button("Connect", key = "mongo_connect_btn"):
         try:
             client = MongoClient(cs, tls = True, tlsCAFile = certifi.where())
             client.admin.command("ping")
@@ -20,7 +21,7 @@ with st.sidebar:
     if "mongo_db" in st.session_state:
         st.subheader("Quick Test")
         q_coll = st.text_input("Test collection name", value = "predictions", key = "test_coll_name")
-        if st.button("Insert test doc"):
+        if st.button("Insert test doc", key = "insert_test_doc_btn"):
             try:
                 res = st.session_state["mongo_db"][q_coll].insert_one({
                     "_created_at": datetime.utcnow(),
