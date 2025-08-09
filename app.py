@@ -1,6 +1,5 @@
 
 import os
-import json
 import pandas as pd
 import numpy as np
 import joblib
@@ -100,6 +99,12 @@ with st.sidebar:
 
 model = load_model(model_path)
 
+# Read model expected columns if available
+try:
+    EXPECTED_COLS = list(model.feature_names_in_)
+except Exception:
+    EXPECTED_COLS = None
+
 # -------------------- Input UI --------------------
 st.subheader("User Data Input")
 st.markdown("Enter values for the model's 21 features to get a prediction.")
@@ -118,6 +123,7 @@ with col1:
         "Other Race"
     ], index = 0)
     family_income_ratio = st.number_input("Family income ratio", min_value = 0.0, max_value = 10.0, value = 2.0, step = 0.1)
+    st.info("Family income ratio: Household income divided by the federal poverty level for your household size. • 1.0 means at the poverty threshold. • 1.1 means 10 percent above the poverty threshold. • 2.0 means 200 percent (2x) the poverty threshold. Higher numbers equal higher income relative to poverty level.")
     smoking_status = st.selectbox("Smoking status", options = ["No", "Yes"], index = 0)
 
 with col2:
@@ -200,24 +206,31 @@ if submitted:
         st.error("Model not loaded. Check your model file path in the sidebar.")
     else:
         try:
-            user_inputs_dict = encode_inputs_to_model_dict()
-            X = pd.DataFrame([user_inputs_dict])
-            # Align columns to model if available
-            try:
-                cols = list(model.feature_names_in_)
-                X = X.reindex(columns = cols, fill_value = 0)
-            except Exception:
-                pass
+            # Build full dict (may include extras)
+            user_inputs_full = encode_inputs_to_model_dict()
+
+            # Strictly match model's expected feature set and order
+            if EXPECTED_COLS is not None:
+                user_inputs_filtered = {}
+                for c in EXPECTED_COLS:
+                    user_inputs_filtered[c] = user_inputs_full.get(c, 0)
+                X = pd.DataFrame([user_inputs_filtered], columns = EXPECTED_COLS)
+            else:
+                X = pd.DataFrame([user_inputs_full])
+
             y_pred = model.predict(X)[0]
             try:
                 y_proba = float(model.predict_proba(X)[0][1])
             except Exception:
                 y_proba = None
+
             st.subheader("Prediction Result")
             st.write("Prediction: " + str(y_pred))
             if y_proba is not None:
                 st.write("Probability of positive class: " + str(round(y_proba, 4)))
-            save_prediction_to_mongo(user_inputs_dict, str(y_pred), y_proba, collection_name = "predictions")
+
+            payload_to_save = user_inputs_filtered if EXPECTED_COLS is not None else user_inputs_full
+            save_prediction_to_mongo(payload_to_save, str(y_pred), y_proba, collection_name = "predictions")
         except Exception as e:
             st.error("Prediction failed: " + str(e))
 
