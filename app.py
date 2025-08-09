@@ -112,7 +112,7 @@ user_inputs['RIDAGEYR'] = st.sidebar.slider('Age in years', 18, 100, 30)
 user_inputs['RIDRETH3'] = st.sidebar.selectbox('Race/Ethnicity', options=list(race_options.keys()))
 user_inputs['INDFMPIR'] = st.sidebar.slider(
     'Family income ratio', 0.0, 5.0, 1.0, step=0.1,
-    help="A value of 1.0 represents the poverty line. A value of 2.0 is twice the poverty line."
+    help="A value of 1.0 means your family income is at the poverty line. A value of 2.0 means it is double the poverty line."
 )
 user_inputs['Is_Smoker_Cat'] = st.sidebar.radio('Smoking status', options=list(smoking_options.keys()))
 user_inputs['SLD012'] = st.sidebar.selectbox('Sleep Disorder Status', options=list(sleep_disorder_options.keys()))
@@ -168,9 +168,17 @@ if st.button('Get Prediction'):
         probabilities = model.predict_proba(input_data)
         prediction_probability = probabilities[0][1] * 100
         
-        st.success(f"### Predicted NAFLD Risk: {prediction_probability:.2f}%")
-        st.info("The prediction is based on the features entered. The higher the percentage, the higher the predicted risk.")
-        
+        # New conditional logic to provide context for the prediction percentage
+        if prediction_probability >= 70:
+            st.error(f"### Predicted NAFLD Risk: {prediction_probability:.2f}% ⚠️")
+            st.markdown("The model predicts a **high risk** of NAFLD based on the features you've entered. A higher percentage suggests a higher likelihood.")
+        elif prediction_probability >= 30:
+            st.warning(f"### Predicted NAFLD Risk: {prediction_probability:.2f}%")
+            st.markdown("The model predicts a **moderate risk** of NAFLD based on the features you've entered. A higher percentage suggests a higher likelihood.")
+        else:
+            st.success(f"### Predicted NAFLD Risk: {prediction_probability:.2f}% ✅")
+            st.markdown("The model predicts a **low risk** of NAFLD based on the features you've entered.")
+
         st.markdown("---")
         st.subheader("Input Data Summary")
         st.dataframe(input_data)
