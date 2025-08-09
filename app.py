@@ -1,28 +1,9 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import joblib
-import os
-from datetime import datetime
-from pymongo.mongo_client import MongoClient
-from pymongo.server_api import ServerApi
-import plotly.express as px
-import certifi
-from typing import Optional, Dict, Any, List
-
-# --- App Configuration ---
-st.set_page_config(
-    page_title="Dissertation Model Predictor",
-    page_icon="🤖",
-    layout="wide"
-)
-
-# --- MongoDB Connection and Sidebar ---
-
-import streamlit as st
 from pymongo import MongoClient
-import pandas as pd
 from datetime import datetime
+
+st.set_page_config(page_title="Dissertation Model Predictor", page_icon="🤖", layout="wide")
 
 # --- MongoDB Connection Class ---
 class MongoDBConnection:
@@ -33,13 +14,15 @@ class MongoDBConnection:
 
     def connect(self, database_name: str) -> bool:
         try:
-            # Simplest, most compatible form (PyMongo handles SRV + TLS automatically)
+            # Simplest form: PyMongo handles SRV and TLS automatically
             self.client = MongoClient(self.connection_string)
 
-            # Ping to confirm the connection
-            self.client.admin.command("ping")
+            # If you still hit TLS issues after IP allowlist + requirements, uncomment below:
+            # import certifi
+            # self.client = MongoClient(self.connection_string, tls=True, tlsCAFile=certifi.where())
 
-            # Set database handle
+            # Ping to confirm
+            self.client.admin.command("ping")
             self.db = self.client[database_name]
             return True
         except Exception as e:
@@ -76,33 +59,25 @@ class MongoDBConnection:
             st.error("Error inserting document: " + str(e))
             return False
 
-
-# --- Sidebar UI ---
+# --- Sidebar: MongoDB Connection ---
 st.sidebar.header("🍃 MongoDB Connection")
 
-# Initialize session state
+# Session state
 if "mongo_conn" not in st.session_state:
     st.session_state.mongo_conn = None
 if "connected" not in st.session_state:
     st.session_state.connected = False
 
-# Load defaults from secrets (your code expects these keys)
+# Load defaults from Streamlit secrets
 secrets_mongo = st.secrets.get("mongo", {})
 default_connection_string = secrets_mongo.get("connection_string", "")
 default_db_name = secrets_mongo.get("db_name", "nafld_db")
 
 # Inputs
-connection_string_input = st.sidebar.text_input(
-    "Connection String",
-    value=default_connection_string,
-    type="password"
-)
-db_name_input = st.sidebar.text_input(
-    "Database Name",
-    value=default_db_name
-)
+connection_string_input = st.sidebar.text_input("Connection String", value=default_connection_string, type="password")
+db_name_input = st.sidebar.text_input("Database Name", value=default_db_name)
 
-# Connect button
+# Connect
 if st.sidebar.button("Connect"):
     st.session_state.mongo_conn = MongoDBConnection(connection_string_input)
     ok = st.session_state.mongo_conn.connect(db_name_input)
@@ -110,9 +85,9 @@ if st.sidebar.button("Connect"):
     if ok:
         st.sidebar.success("Connected to database: " + db_name_input)
     else:
-        st.sidebar.error("Connection failed. Check Atlas Network Access and your secrets.")
+        st.sidebar.error("Connection failed. Check Atlas IP Access List and your secrets.")
 
-# When connected, show collections and a test insert
+# When connected: collections and test tools
 if st.session_state.connected and st.session_state.mongo_conn is not None:
     try:
         cols = st.session_state.mongo_conn.get_collections()
@@ -125,7 +100,6 @@ if st.session_state.connected and st.session_state.mongo_conn is not None:
     except Exception as e:
         st.sidebar.error("Error listing collections: " + str(e))
 
-    # Optional: Insert a test document to initialize a collection
     st.sidebar.subheader("Quick Test")
     test_collection = st.sidebar.text_input("Test collection name", value="predictions")
     if st.sidebar.button("Insert test doc"):
@@ -138,3 +112,18 @@ if st.session_state.connected and st.session_state.mongo_conn is not None:
             st.sidebar.success("Inserted test doc into " + test_collection)
         else:
             st.sidebar.error("Insert failed")
+
+# --- Main Page ---
+st.title("Dissertation Model Predictor")
+st.write("Use the sidebar to connect to MongoDB, then interact with your data below.")
+
+if st.session_state.connected and st.session_state.mongo_conn is not None:
+    st.subheader("Browse a Collection")
+    collection_to_view = st.text_input("Collection name to view", value="predictions")
+    limit_rows = st.slider("Rows to fetch", min_value=10, max_value=500, value=100, step=10)
+    if st.button("Load Collection"):
+        df = st.session_state.mongo_conn.query_collection(collection_to_view, limit=limit_rows)
+        if df.empty:
+            st.info("No data found or collection does not exist yet.")
+        else:
+            st.dataframe(df.head(50))
