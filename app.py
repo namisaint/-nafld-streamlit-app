@@ -7,6 +7,7 @@ from datetime import datetime
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 import plotly.express as px
+import certifi
 
 # --- App Configuration ---
 st.set_page_config(
@@ -16,11 +17,10 @@ st.set_page_config(
 )
 
 # --- MongoDB Connection ---
-# The connection string is like the address of your database.
+# The connection string is the address of your database.
 # You MUST replace this placeholder with your own MongoDB Atlas connection string.
 # A best practice is to store this as a Streamlit secret, not hardcode it.
-# The format has been adjusted to be more robust.
-MONGODB_CONNECTION_STRING = "mongodb+srv://namithastl:<password>@nafld-app.cvmvo5c.mongodb.net/?retryWrites=true&w=majority"
+MONGODB_CONNECTION_STRING = "mongodb+srv://namithastl:<db_password>@nafld-app.cvmvo5c.mongodb.net/?retryWrites=true&w=majority&appName=NAFLD-APP"
 DB_NAME = "nafld_predictions_db"
 COLLECTION_NAME = "predictions"
 
@@ -30,9 +30,9 @@ def get_mongo_client():
     Connects to the MongoDB Atlas cluster.
     """
     try:
-        # Use ServerApi('1') to ensure a secure connection
-        # Added a parameter to fix SSL handshake errors in some environments
-        client = MongoClient(MONGODB_CONNECTION_STRING, server_api=ServerApi('1'), tlsAllowInvalidCertificates=True)
+        # Use ServerApi('1') to ensure a secure connection.
+        # The tls=True and tlsCAFile=certifi.where() parameters fix SSL handshake errors.
+        client = MongoClient(MONGODB_CONNECTION_STRING, server_api=ServerApi('1'), tls=True, tlsCAFile=certifi.where())
         client.admin.command('ping')
         return client
     except Exception as e:
@@ -112,13 +112,11 @@ user_inputs['RIAGENDR'] = st.sidebar.selectbox('Gender', options=list(gender_opt
 user_inputs['RIDAGEYR'] = st.sidebar.slider('Age in years', 18, 100, 30)
 user_inputs['RIDRETH3'] = st.sidebar.selectbox('Race/Ethnicity', options=list(race_options.keys()))
 
-# New user-friendly inputs for family income
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Family Income Details**")
 st.sidebar.markdown("The app calculates your family's income relative to the poverty line. A value of **1.0** means you are at the poverty line.")
 user_inputs['household_income'] = st.sidebar.number_input('Annual household income (£)', min_value=0, step=1000, value=30000, help="Enter your total household income.")
 user_inputs['family_size'] = st.sidebar.number_input('Number of people in household', min_value=1, step=1, value=1, help="Enter the number of people in your household.")
-# Simplified placeholder for the poverty line to demonstrate the app's functionality
 POVERTY_LINE_PER_PERSON = 15000  
 poverty_line_for_family = POVERTY_LINE_PER_PERSON * user_inputs['family_size']
 if user_inputs['family_size'] > 0:
@@ -205,14 +203,12 @@ if st.button('Get Prediction'):
 st.divider()
 st.header("Saved Predictions")
 
-# New section for data visualizations
 if st.button('Show Saved Predictions Analysis'):
     if predictions_collection is not None:
         try:
             saved_predictions = list(predictions_collection.find())
             if saved_predictions:
                 df_predictions = pd.DataFrame(saved_predictions)
-                # Remove MongoDB's default _id column for display
                 df_predictions = df_predictions.drop(columns=['_id'])
 
                 st.subheader("Prediction Percentage Distribution")
@@ -229,4 +225,4 @@ if st.button('Show Saved Predictions Analysis'):
     else:
         st.error("Cannot retrieve predictions. Not connected to MongoDB.")
 
-st.info("To make this code work, you must install the Plotly library (`pip install plotly`) and enter your MongoDB connection string in the code. Then, save this file as `app.py` and commit it to your GitHub repository.")
+st.info("To make this code work, you must install the Plotly library (`pip install plotly`), the certifi library (`pip install certifi`), and enter your MongoDB connection string in the code. Then, save this file as `app.py` and commit it to your GitHub repository.")
