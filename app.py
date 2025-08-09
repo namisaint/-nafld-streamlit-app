@@ -122,7 +122,6 @@ def encode_inputs():
     return out
 
 # Force exactly 21 columns
-# Change the final race_... entry below if your model used a different single race dummy
 EXPECTED_21 = [
     "gender_male","age_years","family_income_ratio","smoker_yes","sleep_disorder_yes",
     "sleep_duration_hours","work_hours","physical_activity_mins","bmi",
@@ -133,12 +132,23 @@ EXPECTED_21 = [
 ]
 
 # If the model exposes feature_names_in_, prefer that
-if MODEL_COLS is not None:
-    EXPECTED_21 = list(MODEL_COLS)
+if model is not None:
+    try:
+        EXPECTED_21 = list(model.feature_names_in_)
+    except Exception:
+        pass
 
 submitted = st.button("Predict")
 
-# Save to Mongo helper
+# Helpers for nicer output
+
+def risk_label(p):
+    if p < 0.33:
+        return "Low", "green"
+    if p < 0.66:
+        return "Borderline", "orange"
+    return "High", "red"
+
 
 def save_to_mongo(payload, pred, proba):
     if "mongo_db" not in st.session_state:
@@ -169,26 +179,28 @@ if submitted:
                 y_proba = float(model.predict_proba(X)[0][1])
             except Exception:
                 y_proba = None
-            st.subheader("Prediction Result")
-            st.write("Prediction: " + str(y_pred))
+
+            st.subheader("Prediction")
             if y_proba is not None:
-                st.write("Probability of positive class: " + str(round(y_proba, 4)))
+                p = max(0.0, min(1.0, y_proba))
+                pct = int(round(p * 100))
+                label, color = risk_label(p)
+                st.markdown("Risk category: **" + label + "**")
+                st.progress(p)
+                st.write("Estimated probability: " + str(pct) + "%")
+                st.caption("This is the model’s estimated chance of NAFLD given the inputs. It is not a diagnosis.")
+            else:
+                st.write("Predicted class: " + ("Positive" if int(y_pred) == 1 else "Negative"))
+                st.caption("Your model did not provide a probability. Showing the class only.")
+
+            if y_proba is not None:
+                if y_proba < 0.33:
+                    st.info("Result suggests a low likelihood. Consider maintaining current lifestyle habits and regular checkups.")
+                elif y_proba < 0.66:
+                    st.warning("Result suggests a borderline likelihood. Consider discussing lifestyle changes and screening with a clinician.")
+                else:
+                    st.error("Result suggests a higher likelihood. Consider clinical evaluation and targeted lifestyle changes.")
+
             save_to_mongo(row, str(y_pred), y_proba)
         except Exception as e:
             st.error("Prediction failed: " + str(e))
-
-# Browse
-st.subheader("Browse a MongoDB collection")
-coll_name = st.text_input("Collection name", value = "predictions")
-if st.button("Load Collection") and "mongo_db" in st.session_state:
-    try:
-        docs = list(st.session_state["mongo_db"][coll_name].find().limit(50))
-        for d in docs:
-            if "_id" in d:
-                d["_id"] = str(d["_id"])
-        if len(docs) == 0:
-            st.info("No documents found.")
-        else:
-            st.dataframe(pd.DataFrame(docs))
-    except Exception as e:
-        st.error("Browse failed: " + str(e))
