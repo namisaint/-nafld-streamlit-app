@@ -112,7 +112,7 @@ user_inputs['RIDAGEYR'] = st.sidebar.slider('Age in years', 18, 100, 30)
 user_inputs['RIDRETH3'] = st.sidebar.selectbox('Race/Ethnicity', options=list(race_options.keys()))
 user_inputs['INDFMPIR'] = st.sidebar.slider(
     'Family income ratio', 0.0, 5.0, 1.0, step=0.1,
-    help="A value of 1.0 means your family income is at the poverty line. A value of 2.0 means it is double the poverty line."
+    help="This is the ratio of your household income to the federal poverty line. For example, a value of 1.5 means your income is 150% of the poverty line."
 )
 user_inputs['Is_Smoker_Cat'] = st.sidebar.radio('Smoking status', options=list(smoking_options.keys()))
 user_inputs['SLD012'] = st.sidebar.selectbox('Sleep Disorder Status', options=list(sleep_disorder_options.keys()))
