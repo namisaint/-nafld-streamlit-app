@@ -18,7 +18,7 @@ st.set_page_config(
 
 # --- MongoDB Connection ---
 # The connection string is the address of your database.
-# You MUST replace this placeholder with your own MongoDB Atlas connection string.
+# YOU MUST REPLACE THIS PLACEHOLDER with your own MongoDB Atlas connection string.
 # A best practice is to store this as a Streamlit secret, not hardcode it.
 MONGODB_CONNECTION_STRING = "mongodb+srv://namithastl:<db_password>@nafld-app.cvmvo5c.mongodb.net/?retryWrites=true&w=majority&appName=NAFLD-APP"
 DB_NAME = "nafld_predictions_db"
@@ -30,8 +30,8 @@ def get_mongo_client():
     Connects to the MongoDB Atlas cluster.
     """
     try:
-        # Use ServerApi('1') to ensure a secure connection.
-        # The tls=True and tlsCAFile=certifi.where() parameters fix SSL handshake errors.
+        # This fix uses the certifi library to resolve SSL handshake issues.
+        # It ensures a secure connection is made successfully from Streamlit's servers.
         client = MongoClient(MONGODB_CONNECTION_STRING, server_api=ServerApi('1'), tls=True, tlsCAFile=certifi.where())
         client.admin.command('ping')
         return client
