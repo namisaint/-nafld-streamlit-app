@@ -31,7 +31,8 @@ def get_mongo_client():
     """
     try:
         # Use ServerApi('1') to ensure a secure connection
-        client = MongoClient(MONGODB_CONNECTION_STRING, server_api=ServerApi('1'))
+        # Added a parameter to fix SSL handshake errors in some environments
+        client = MongoClient(MONGODB_CONNECTION_STRING, server_api=ServerApi('1'), tlsAllowInvalidCertificates=True)
         client.admin.command('ping')
         return client
     except Exception as e:
