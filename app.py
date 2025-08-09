@@ -20,7 +20,7 @@ st.set_page_config(
 # The connection string is the address of your database.
 # YOU MUST REPLACE THIS PLACEHOLDER with your own MongoDB Atlas connection string.
 # A best practice is to store this as a Streamlit secret, not hardcode it.
-MONGODB_CONNECTION_STRING = "mongodb+srv://namithastl:<db_password>@nafld-app.cvmvo5c.mongodb.net/?retryWrites=true&w=majority&appName=NAFLD-APP"
+MONGODB_CONNECTION_STRING = "mongodb+srv://namithastl:<L7nSqObMEi4Eio52>@nafld-app.cvmvo5c.mongodb.net/?retryWrites=true&w=majority&appName=NAFLD-APP"
 DB_NAME = "nafld_predictions_db"
 COLLECTION_NAME = "predictions"
 
