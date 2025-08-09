@@ -1,232 +1,225 @@
-import streamlit as st
+
+import os
+import json
 import pandas as pd
 import numpy as np
 import joblib
-import os
+import streamlit as st
 from datetime import datetime
-from pymongo.mongo_client import MongoClient
-from pymongo.server_api import ServerApi
-import plotly.express as px
+from pymongo import MongoClient
 import certifi
 
-# --- App Configuration ---
-st.set_page_config(
-    page_title="Dissertation Model Predictor",
-    page_icon="�",
-    layout="wide"
-)
-
-# --- MongoDB Connection ---
-# The connection string is now read securely from st.secrets.
-# NEVER hardcode passwords or connection strings in your app.py file.
-try:
-    MONGODB_CONNECTION_STRING = st.secrets["mongo"]["connection_string"]
-    DB_NAME = st.secrets["mongo"]["db_name"]
-    COLLECTION_NAME = st.secrets["mongo"]["collection_name"]
-except KeyError:
-    st.error("MongoDB secrets are not configured. Please add your credentials to the Streamlit secrets.")
-    st.stop()
+st.set_page_config(page_title = "NAFLD Lifestyle Risk Predictor", layout = "wide")
+st.title("NAFLD Lifestyle Risk Predictor")
+st.caption("Enter values for the model features to get a prediction. Use the sidebar to connect to MongoDB and choose the model file.")
 
 @st.cache_resource
-def get_mongo_client():
-    """
-    Connects to the MongoDB Atlas cluster.
-    """
+def load_model(model_path):
     try:
-        # This fix uses the certifi library to resolve SSL handshake issues.
-        # It ensures a secure connection is made successfully from Streamlit's servers.
-        client = MongoClient(MONGODB_CONNECTION_STRING, server_api=ServerApi('1'), tls=True, tlsCAFile=certifi.where())
-        client.admin.command('ping')
-        return client
+        model_obj = joblib.load(model_path)
+        return model_obj
     except Exception as e:
-        st.error(f"Error connecting to MongoDB: {e}")
+        st.error("Error loading model from " + model_path + ": " + str(e))
         return None
 
-mongo_client = get_mongo_client()
-if mongo_client:
-    db = mongo_client[DB_NAME]
-    predictions_collection = db[COLLECTION_NAME]
-else:
-    st.error("Could not connect to the database. The app will not be able to save or load predictions.")
-    predictions_collection = None
+# -------------------- MongoDB helpers --------------------
 
+def connect_mongo_ui():
+    with st.sidebar:
+        st.header("MongoDB")
+        mongo_secrets = st.secrets.get("mongo", {})
+        cs_default = mongo_secrets.get("connection_string", "")
+        dbn_default = mongo_secrets.get("db_name", "nafld_db")
+        cs = st.text_input("Connection String", value = cs_default, type = "password", key = "mongo_uri_input")
+        dbn = st.text_input("Database Name", value = dbn_default, key = "mongo_db_name_input")
+        if st.button("Connect", key = "mongo_connect_btn"):
+            try:
+                client = MongoClient(cs, tls = True, tlsCAFile = certifi.where())
+                client.admin.command("ping")
+                st.session_state["mongo_client"] = client
+                st.session_state["mongo_db"] = client[dbn]
+                st.success("Connected to database: " + dbn)
+            except Exception as e:
+                st.error("Mongo connection failed: " + str(e))
+        if "mongo_db" in st.session_state:
+            st.subheader("Quick Test")
+            q_coll = st.text_input("Test collection name", value = "predictions", key = "test_coll_name")
+            if st.button("Insert test doc", key = "insert_test_doc_btn"):
+                try:
+                    res = st.session_state["mongo_db"][q_coll].insert_one({
+                        "_created_at": datetime.utcnow(),
+                        "hello": "world"
+                    })
+                    st.success("Inserted document with id " + str(res.inserted_id))
+                except Exception as e:
+                    st.error("Insert failed: " + str(e))
 
-# --- Main App Title and Introduction ---
-st.title("🤖 NAFLD Lifestyle Risk Predictor")
-st.markdown("""
-This application allows you to interact with the machine learning model developed for my dissertation.
-Use the sidebar to input new data and get a prediction from the model.
-""")
-st.divider()
-
-# --- Model Loading and Caching ---
-@st.cache_resource
-def load_model(file_path):
-    """
-    Loads the machine learning model from a pickled file.
-    """
-    if not os.path.exists(file_path):
-        st.error(f"Error: Model file not found at '{file_path}'")
-        return None
-    
+def save_prediction_to_mongo(input_payload, prediction_value, prediction_proba = None, collection_name = "predictions"):
+    if "mongo_db" not in st.session_state:
+        return
+    doc = {
+        "_created_at": datetime.utcnow(),
+        "inputs": input_payload,
+        "prediction": prediction_value,
+        "probability": prediction_proba
+    }
     try:
-        model = joblib.load(file_path)
-        return model
+        st.session_state["mongo_db"][collection_name].insert_one(doc)
+        st.success("Saved prediction to MongoDB in collection " + collection_name)
     except Exception as e:
-        st.error(f"Error loading the model: {e}")
-        return None
+        st.error("Save failed: " + str(e))
 
-model = load_model('rf_lifestyle_model (1).pkl')
-if model is None:
-    st.stop()
+def browse_mongo_ui():
+    if "mongo_db" not in st.session_state:
+        return
+    with st.expander("Browse a MongoDB collection"):
+        browse_name = st.text_input("Collection name to view", value = "predictions")
+        rows_to_fetch = st.number_input("Rows to fetch", min_value = 5, max_value = 1000, value = 50, step = 5)
+        if st.button("Load Collection", key = "browse_load_btn"):
+            try:
+                docs = list(st.session_state["mongo_db"][browse_name].find().limit(int(rows_to_fetch)))
+                for d in docs:
+                    if "_id" in d:
+                        d["_id"] = str(d["_id"])
+                if len(docs) == 0:
+                    st.info("No documents found.")
+                else:
+                    st.dataframe(pd.DataFrame(docs))
+            except Exception as e:
+                st.error("Browse failed: " + str(e))
 
-feature_names = [
-    'RIAGENDR', 'RIDAGEYR', 'RIDRETH3', 'INDFMPIR', 'ALQ111', 'ALQ121', 'ALQ142',
-    'ALQ151', 'ALQ170', 'Is_Smoker_Cat', 'SLQ050', 'SLQ120', 'SLD012', 'DR1TKCAL',
-    'DR1TPROT', 'DR1TCARB', 'DR1TSUGR', 'DR1TFIBE', 'DR1TTFAT', 'PAQ620', 'BMXBMI'
-]
+# Call Mongo UI builder
+connect_mongo_ui()
 
-# Dictionary to map technical feature names to human-readable labels
-feature_labels = {
-    'RIAGENDR': 'Gender', 'RIDAGEYR': 'Age in years', 'RIDRETH3': 'Race/Ethnicity',
-    'INDFMPIR': 'Family income ratio', 'ALQ111': 'Alcohol consumption (days/week)',
-    'ALQ121': 'Alcohol drinks/day', 'ALQ142': 'Number of days drank in the past year',
-    'ALQ151': 'Number of drinks per day', 'ALQ170': 'Alcohol intake frequency',
-    'Is_Smoker_Cat': 'Smoking status', 'SLQ050': 'Sleep duration (hours/day)',
-    'SLQ120': 'Work schedule duration (hours)', 'SLD012': 'Sleep disorder status',
-    'DR1TKCAL': 'Total calorie intake (kcal)', 'DR1TPROT': 'Total protein intake (g)',
-    'DR1TCARB': 'Total carbohydrate intake (g)', 'DR1TSUGR': 'Total sugar intake (g)',
-    'DR1TFIBE': 'Total fiber intake (g)', 'DR1TTFAT': 'Total fat intake (g)',
-    'PAQ620': 'Physical activity (minutes/day)', 'BMXBMI': 'BMI'
-}
+# -------------------- Sidebar: Model selection --------------------
+with st.sidebar:
+    st.header("Model")
+    default_model = "rf_lifestyle_model (1).pkl"
+    model_path = st.text_input("Model file path", value = default_model, key = "model_path_input")
+    st.caption("Ensure the model file is in the repo next to app.py.")
 
-gender_options = {'Male': 1, 'Female': 2}
-smoking_options = {'No': 0, 'Yes': 1}
-race_options = {
-    'Mexican American': 1, 'Other Hispanic': 2, 'Non-Hispanic White': 3,
-    'Non-Hispanic Black': 4, 'Other Race - Including Multi-Racial': 6
-}
-sleep_disorder_options = {'No': 0, 'Yes': 1}
+model = load_model(model_path)
 
-user_inputs = {}
-st.sidebar.header("User Data Input")
-st.sidebar.subheader("Demographic & Lifestyle")
-user_inputs['RIAGENDR'] = st.sidebar.selectbox('Gender', options=list(gender_options.keys()))
-user_inputs['RIDAGEYR'] = st.sidebar.slider('Age in years', 18, 100, 30)
-user_inputs['RIDRETH3'] = st.sidebar.selectbox('Race/Ethnicity', options=list(race_options.keys()))
+# -------------------- Input UI --------------------
+st.subheader("User Data Input")
+st.markdown("Enter values for the model's 21 features to get a prediction.")
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("**Family Income Details**")
-st.sidebar.markdown("The app calculates your family's income relative to the poverty line. A value of **1.0** means you are at the poverty line.")
-user_inputs['household_income'] = st.sidebar.number_input('Annual household income (£)', min_value=0, step=1000, value=30000, help="Enter your total household income.")
-user_inputs['family_size'] = st.sidebar.number_input('Number of people in household', min_value=1, step=1, value=1, help="Enter the number of people in your household.")
-POVERTY_LINE_PER_PERSON = 15000  
-poverty_line_for_family = POVERTY_LINE_PER_PERSON * user_inputs['family_size']
-if user_inputs['family_size'] > 0:
-    user_inputs['INDFMPIR'] = user_inputs['household_income'] / poverty_line_for_family
-else:
-    user_inputs['INDFMPIR'] = 0.0
-st.sidebar.caption(f"Your calculated income ratio is: **{user_inputs['INDFMPIR']:.2f}**")
+col1, col2, col3 = st.columns(3)
 
-user_inputs['Is_Smoker_Cat'] = st.sidebar.radio('Smoking status', options=list(smoking_options.keys()))
-user_inputs['SLD012'] = st.sidebar.selectbox('Sleep Disorder Status', options=list(sleep_disorder_options.keys()))
-user_inputs['SLQ050'] = st.sidebar.number_input('Sleep duration (hours/day)', step=0.5, value=8.0)
-user_inputs['SLQ120'] = st.sidebar.number_input('Work schedule duration (hours)', step=1, value=8)
+with col1:
+    gender = st.selectbox("Gender", options = ["Male", "Female"], index = 0)
+    age_years = st.number_input("Age in years", min_value = 0, max_value = 120, value = 40, step = 1)
+    race = st.selectbox("Race/Ethnicity", options = [
+        "Mexican American",
+        "Other Hispanic",
+        "Non-Hispanic White",
+        "Non-Hispanic Black",
+        "Non-Hispanic Asian",
+        "Other Race"
+    ], index = 0)
+    family_income_ratio = st.number_input("Family income ratio", min_value = 0.0, max_value = 10.0, value = 2.0, step = 0.1)
+    smoking_status = st.selectbox("Smoking status", options = ["No", "Yes"], index = 0)
 
-st.sidebar.divider()
-st.sidebar.subheader("Alcohol & Physical Activity")
-user_inputs['ALQ111'] = st.sidebar.number_input('Alcohol consumption (days/week)', min_value=0, max_value=7, step=1, value=0)
-user_inputs['ALQ121'] = st.sidebar.number_input('Alcohol drinks per day', min_value=0, max_value=50, step=1, value=0,
-    help="A standard drink is 14g of pure alcohol (e.g., 12oz beer, 5oz wine, 1.5oz spirits).")
-user_inputs['ALQ142'] = st.sidebar.number_input('Number of days drank in the past year', min_value=0, max_value=365, step=1, value=0)
-user_inputs['ALQ151'] = st.sidebar.number_input('Max number of drinks on any single day', min_value=0, max_value=50, step=1, value=0)
-user_inputs['ALQ170'] = st.sidebar.number_input('Alcohol intake frequency (drinks/day)', min_value=0, step=1, value=0)
-user_inputs['PAQ620'] = st.sidebar.number_input('Physical activity (minutes/day)', min_value=0, step=15, value=30)
+with col2:
+    sleep_disorder = st.selectbox("Sleep Disorder Status", options = ["No", "Yes"], index = 0)
+    sleep_duration_hours = st.number_input("Sleep duration (hours/day)", min_value = 0.0, max_value = 24.0, value = 8.0, step = 0.25)
+    work_hours = st.number_input("Work schedule duration (hours)", min_value = 0, max_value = 24, value = 8, step = 1)
+    physical_activity_mins = st.number_input("Physical activity (minutes/day)", min_value = 0, max_value = 1440, value = 30, step = 5)
+    bmi = st.number_input("BMI", min_value = 10.0, max_value = 60.0, value = 25.0, step = 0.1)
 
-st.sidebar.divider()
-st.sidebar.subheader("Nutritional Information")
-user_inputs['DR1TKCAL'] = st.sidebar.number_input('Total calorie intake (kcal)', min_value=0, step=100, value=2000,
-    help="Estimate your daily total calories.")
-user_inputs['DR1TPROT'] = st.sidebar.number_input('Total protein intake (grams)', min_value=0, step=1, value=60)
-user_inputs['DR1TCARB'] = st.sidebar.number_input('Total carbohydrate intake (grams)', min_value=0, step=1, value=250)
-user_inputs['DR1TSUGR'] = st.sidebar.number_input('Total sugar intake (grams)', min_value=0, step=1, value=40)
-user_inputs['DR1TFIBE'] = st.sidebar.number_input('Total fiber intake (grams)', min_value=0, step=1, value=30)
-user_inputs['DR1TTFAT'] = st.sidebar.number_input('Total fat intake (grams)', min_value=0, step=1, value=70)
-user_inputs['BMXBMI'] = st.sidebar.number_input('BMI', step=0.1, value=25.0, help="Body Mass Index")
+with col3:
+    alcohol_days_week = st.number_input("Alcohol consumption (days/week)", min_value = 0, max_value = 7, value = 0, step = 1)
+    alcohol_drinks_per_day = st.number_input("Alcohol drinks per day", min_value = 0, max_value = 50, value = 0, step = 1)
+    alcohol_days_past_year = st.number_input("Number of days drank in the past year", min_value = 0, max_value = 366, value = 0, step = 1)
+    alcohol_max_any_day = st.number_input("Max number of drinks on any single day", min_value = 0, max_value = 50, value = 0, step = 1)
+    alcohol_intake_freq = st.number_input("Alcohol intake frequency (drinks/day)", min_value = 0.0, max_value = 50.0, value = 0.0, step = 0.1)
 
-final_inputs = {
-    'RIAGENDR': gender_options[user_inputs['RIAGENDR']],
-    'RIDRETH3': race_options[user_inputs['RIDRETH3']],
-    'Is_Smoker_Cat': smoking_options[user_inputs['Is_Smoker_Cat']],
-    'SLD012': sleep_disorder_options[user_inputs['SLD012']],
-    'INDFMPIR': user_inputs['INDFMPIR'],
-}
-for feature in feature_names:
-    if feature not in final_inputs:
-        final_inputs[feature] = user_inputs[feature]
+st.subheader("Nutritional Information")
+col4, col5, col6 = st.columns(3)
+with col4:
+    total_calories = st.number_input("Total calorie intake (kcal)", min_value = 0, max_value = 10000, value = 2000, step = 50)
+    total_protein = st.number_input("Total protein intake (grams)", min_value = 0, max_value = 500, value = 60, step = 5)
+with col5:
+    total_carbs = st.number_input("Total carbohydrate intake (grams)", min_value = 0, max_value = 1000, value = 250, step = 5)
+    total_sugar = st.number_input("Total sugar intake (grams)", min_value = 0, max_value = 1000, value = 40, step = 5)
+with col6:
+    total_fiber = st.number_input("Total fiber intake (grams)", min_value = 0, max_value = 500, value = 30, step = 1)
+    total_fat = st.number_input("Total fat intake (grams)", min_value = 0, max_value = 500, value = 70, step = 1)
 
-input_data = pd.DataFrame([final_inputs], columns=feature_names)
+# Submit
+submitted = st.button("Predict")
 
-st.header("Prediction Result")
-st.markdown("Click the button below to get a prediction from the model.")
+# Helper to encode inputs to feature dict
 
-if st.button('Get Prediction'):
-    if predictions_collection is not None:
-        try:
-            prediction = model.predict(input_data)
-            probabilities = model.predict_proba(input_data)
-            prediction_probability = probabilities[0][1] * 100
+def encode_inputs_to_model_dict():
+    # One-hot for race
+    races = [
+        "Mexican American",
+        "Other Hispanic",
+        "Non-Hispanic White",
+        "Non-Hispanic Black",
+        "Non-Hispanic Asian",
+        "Other Race"
+    ]
+    race_one_hot = {}
+    for r in races:
+        key = "race_" + r.replace(" ", "_")
+        race_one_hot[key] = 1 if race == r else 0
 
-            prediction_data = {
-                'timestamp': datetime.now(),
-                'input_features': final_inputs,
-                'prediction_percentage': prediction_probability,
-            }
-            predictions_collection.insert_one(prediction_data)
+    gender_male = 1 if gender == "Male" else 0
+    smoker_yes = 1 if smoking_status == "Yes" else 0
+    sleep_disorder_yes = 1 if sleep_disorder == "Yes" else 0
 
-            if prediction_probability >= 70:
-                st.error(f"### Predicted NAFLD Risk: {prediction_probability:.2f}% ⚠️")
-                st.markdown("The model predicts a **high risk** of NAFLD.")
-            elif prediction_probability >= 30:
-                st.warning(f"### Predicted NAFLD Risk: {prediction_probability:.2f}%")
-                st.markdown("The model predicts a **moderate risk** of NAFLD.")
-            else:
-                st.success(f"### Predicted NAFLD Risk: {prediction_probability:.2f}% ✅")
-                st.markdown("The model predicts a **low risk** of NAFLD.")
+    features = {
+        "gender_male": gender_male,
+        "age_years": age_years,
+        "family_income_ratio": float(family_income_ratio),
+        "smoker_yes": smoker_yes,
+        "sleep_disorder_yes": sleep_disorder_yes,
+        "sleep_duration_hours": float(sleep_duration_hours),
+        "work_hours": int(work_hours),
+        "alcohol_days_week": int(alcohol_days_week),
+        "alcohol_drinks_per_day": int(alcohol_drinks_per_day),
+        "alcohol_days_past_year": int(alcohol_days_past_year),
+        "alcohol_max_any_day": int(alcohol_max_any_day),
+        "alcohol_intake_freq": float(alcohol_intake_freq),
+        "physical_activity_mins": int(physical_activity_mins),
+        "total_calories": int(total_calories),
+        "total_protein": int(total_protein),
+        "total_carbs": int(total_carbs),
+        "total_sugar": int(total_sugar),
+        "total_fiber": int(total_fiber),
+        "total_fat": int(total_fat),
+        "bmi": float(bmi)
+    }
+    features.update(race_one_hot)
+    return features
 
-            st.markdown("---")
-            st.subheader("Input Data Summary")
-            st.dataframe(input_data)
-        except Exception as e:
-            st.error(f"An error occurred during prediction: {e}")
-            st.error("Please ensure that all 21 features have valid numerical inputs.")
+if submitted:
+    if model is None:
+        st.error("Model not loaded. Check your model file path in the sidebar.")
     else:
-        st.error("Cannot save prediction. Not connected to MongoDB.")
-
-st.divider()
-st.header("Saved Predictions")
-
-if st.button('Show Saved Predictions Analysis'):
-    if predictions_collection is not None:
         try:
-            saved_predictions = list(predictions_collection.find())
-            if saved_predictions:
-                df_predictions = pd.DataFrame(saved_predictions)
-                df_predictions = df_predictions.drop(columns=['_id'])
-
-                st.subheader("Prediction Percentage Distribution")
-                st.markdown("This histogram shows the frequency of predicted NAFLD risk percentages based on all user inputs.")
-                fig = px.histogram(df_predictions, x="prediction_percentage", nbins=20, title="NAFLD Risk Prediction Distribution")
-                st.plotly_chart(fig, use_container_width=True)
-
-                st.subheader("Raw Saved Data")
-                st.dataframe(df_predictions)
-            else:
-                st.info("No saved predictions found.")
+            user_inputs_dict = encode_inputs_to_model_dict()
+            X = pd.DataFrame([user_inputs_dict])
+            # Align columns to model if available
+            try:
+                cols = list(model.feature_names_in_)
+                X = X.reindex(columns = cols, fill_value = 0)
+            except Exception:
+                pass
+            y_pred = model.predict(X)[0]
+            try:
+                y_proba = float(model.predict_proba(X)[0][1])
+            except Exception:
+                y_proba = None
+            st.subheader("Prediction Result")
+            st.write("Prediction: " + str(y_pred))
+            if y_proba is not None:
+                st.write("Probability of positive class: " + str(round(y_proba, 4)))
+            save_prediction_to_mongo(user_inputs_dict, str(y_pred), y_proba, collection_name = "predictions")
         except Exception as e:
-            st.error(f"Error retrieving predictions: {e}")
-    else:
-        st.error("Cannot retrieve predictions. Not connected to MongoDB.")
+            st.error("Prediction failed: " + str(e))
 
-st.info("To make this code work, you must install the Plotly library (`pip install plotly`), the certifi library (`pip install certifi`), and you must set up your MongoDB connection string in Streamlit Secrets.")
-�
+# -------------------- Browse saved docs --------------------
+browse_mongo_ui()
