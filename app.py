@@ -228,4 +228,4 @@ if st.button('Show Saved Predictions Analysis'):
     else:
         st.error("Cannot retrieve predictions. Not connected to MongoDB.")
 
-st.info("To make this code work, you must install the Plotly library (`pip install plotly`), the certifi library (`pip install certifi`), and enter your MongoDB connection string in the code. Then, save this file as `app.py` and commit it to your GitHub repository.")
+st.info("To make this code work, you must install the Plotly library (`pip install plotly`), the certifi library (`pip install certifi`), and you must set up your MongoDB connection string in Streamlit Secrets.")
