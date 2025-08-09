@@ -101,6 +101,15 @@ race_options = {
     'Other Race - Including Multi-Racial': 6
 }
 sleep_disorder_options = {'No': 0, 'Yes': 1}
+income_options = {
+    'Less than the poverty line': 0.5,
+    'At the poverty line': 1.0,
+    '1.5 times the poverty line': 1.5,
+    '2 times the poverty line': 2.0,
+    '3 times the poverty line': 3.0,
+    'More than 3 times the poverty line': 4.0
+}
+
 
 user_inputs = {}
 
@@ -110,9 +119,10 @@ st.sidebar.subheader("Demographic & Lifestyle")
 user_inputs['RIAGENDR'] = st.sidebar.selectbox('Gender', options=list(gender_options.keys()))
 user_inputs['RIDAGEYR'] = st.sidebar.slider('Age in years', 18, 100, 30)
 user_inputs['RIDRETH3'] = st.sidebar.selectbox('Race/Ethnicity', options=list(race_options.keys()))
-user_inputs['INDFMPIR'] = st.sidebar.slider(
-    'Family income ratio', 0.0, 5.0, 1.0, step=0.1,
-    help="This is the ratio of your household income to the federal poverty line. For example, a value of 1.5 means your income is 150% of the poverty line."
+user_inputs['INDFMPIR'] = st.sidebar.selectbox(
+    'Family income ratio',
+    options=list(income_options.keys()),
+    help="Select the option that best describes your household's income relative to the poverty line."
 )
 user_inputs['Is_Smoker_Cat'] = st.sidebar.radio('Smoking status', options=list(smoking_options.keys()))
 user_inputs['SLD012'] = st.sidebar.selectbox('Sleep Disorder Status', options=list(sleep_disorder_options.keys()))
@@ -148,11 +158,12 @@ final_inputs = {
     'RIDRETH3': race_options[user_inputs['RIDRETH3']],
     'Is_Smoker_Cat': smoking_options[user_inputs['Is_Smoker_Cat']],
     'SLD012': sleep_disorder_options[user_inputs['SLD012']],
+    'INDFMPIR': income_options[user_inputs['INDFMPIR']],
 }
 
 # Add the rest of the numerical inputs to the final dictionary
 for feature in feature_names:
-    if feature not in ['RIAGENDR', 'RIDRETH3', 'Is_Smoker_Cat', 'SLD012']:
+    if feature not in ['RIAGENDR', 'RIDRETH3', 'Is_Smoker_Cat', 'SLD012', 'INDFMPIR']:
         final_inputs[feature] = user_inputs[feature]
 
 # Combine final user inputs into a single DataFrame for prediction, ensuring correct order
