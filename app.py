@@ -8,7 +8,6 @@ from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 import plotly.express as px
 import certifi
-import shap
 import matplotlib.pyplot as plt
 from fpdf import FPDF
 from io import BytesIO
@@ -341,20 +340,20 @@ if model is not None:
 
         # Create an expandable section for advanced details
         with st.expander("Show Advanced Analysis"):
-            # SHAP Analysis
-            st.subheader("Model Explainability (SHAP)")
+            # 
+            st.subheader("Model Explainability (
             st.markdown("The chart below shows how each feature contributed to the predicted risk. Red bars increase risk, while blue bars decrease it.")
             
-            # Cache the SHAP explainer for performance
+            # Cache the 
             @st.cache_resource
             def get_explainer(_model):
-                return shap.TreeExplainer(_model)
+                return 
             
             explainer = get_explainer(model)
-            shap_values = explainer.shap_values(X)
-            # Create a Matplotlib figure for the SHAP plot
+            
+            # Create a Matplotlib figure for the 
             fig, ax = plt.subplots(figsize=(10, 6))
-            shap.summary_plot(shap_values[1], X, plot_type="bar", show=False, ax=ax)
+            
             st.pyplot(fig)
             
             st.markdown("---")
