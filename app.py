@@ -1,162 +1,34 @@
-import streamlit as st
 import pandas as pd
-import numpy as np
 import joblib
-import os
+import streamlit as st
 from datetime import datetime
-from pymongo.mongo_client import MongoClient
-from pymongo.server_api import ServerApi
-import plotly.express as px
+from pymongo import MongoClient
 import certifi
 import shap
 import matplotlib.pyplot as plt
 from fpdf import FPDF
 from io import BytesIO
+from pymongo.server_api import ServerApi
 
-
-# === Julius minimal helpers (no secrets/mongo changes) ===
-import pandas as _pd
-import numpy as _np
-import streamlit as _st
-
-EXPECTED_FEATURES = [
-    'Gender','Age in years','Race/Ethnicity','Family income ratio','Smoking status','Sleep Disorder Status',
-    'Sleep duration (hours/day)','Work schedule duration (hours)','Physical activity (minutes/day)','BMI',
-    'Alcohol consumption (days/week)','Alcohol drinks per day','Number of days drank in the past year',
-    'Max number of drinks on any single day','Alcohol intake frequency (drinks/day)','Total calorie intake (kcal)',
-    'Total protein intake (grams)','Total carbohydrate intake (grams)','Total sugar intake (grams)',
-    'Total fiber intake (grams)','Total fat intake (grams)'
-]
-
-def _build_X_from_values(values_dict):
-    # Cast to numeric where possible; if categorical strings expected, leave as-is to let pipeline handle
-    row = {}
-    for k in EXPECTED_FEATURES:
-        v = values_dict.get(k, None)
-        row[k] = v
-    X = _pd.DataFrame([row], columns = EXPECTED_FEATURES)
-    # Coerce numerics where appropriate but ignore errors (pipeline may handle)
-    numeric_like = [
-        'Age in years','Family income ratio','Sleep duration (hours/day)','Work schedule duration (hours)',
-        'Physical activity (minutes/day)','BMI','Alcohol consumption (days/week)','Alcohol drinks per day',
-        'Number of days drank in the past year','Max number of drinks on any single day',
-        'Alcohol intake frequency (drinks/day)','Total calorie intake (kcal)','Total protein intake (grams)',
-        'Total carbohydrate intake (grams)','Total sugar intake (grams)','Total fiber intake (grams)','Total fat intake (grams)'
-    ]
-    for c in numeric_like:
-        if c in X.columns:
-            X[c] = _pd.to_numeric(X[c], errors = 'coerce')
-    return X
-
-def _positive_index(model_obj):
-    try:
-        classes = list(model_obj.classes_)
-        if 1 in classes:
-            return classes.index(1)
-        if '1' in classes:
-            return classes.index('1')
-        if True in classes:
-            return classes.index(True)
-        # default to the larger label as positive if numeric
-        try:
-            nums = [float(x) for x in classes]
-            return nums.index(max(nums))
-        except Exception:
-            return 1 if len(classes) > 1 else 0
-    except Exception:
-        return 1
-
-def _predict_prob_safe(model_obj, X_df):
-    # Prefer predict_proba
-    try:
-        pos = _positive_index(model_obj)
-        return float(model_obj.predict_proba(X_df)[0][pos])
-    except Exception:
-        # Try pipelines exposing inner classifier
-        try:
-            clf = model_obj.named_steps.get('classifier', None)
-            if clf is not None and hasattr(clf, 'predict_proba'):
-                pos = _positive_index(clf)
-                return float(clf.predict_proba(X_df)[0][pos])
-        except Exception:
-            pass
-        # Decision function fallback
-        try:
-            val = float(model_obj.decision_function(X_df)[0])
-            val_c = max(min((val + 5.0) / 10.0, 1.0), 0.0)
-            return float(val_c)
-        except Exception:
-            # Binary predict fallback
-            try:
-                return float(_np.clip(float(model_obj.predict(X_df)[0]), 0.0, 1.0))
-            except Exception:
-                return 0.5
-
-def render_risk_card(prob):
-    try:
-        p = float(prob)
-    except Exception:
-        p = 0.0
-    if p < 0.34:
-        label = 'Low'; color = '#22c55e'
-    elif p < 0.67:
-        label = 'Medium'; color = '#f59e0b'
-    else:
-        label = 'High'; color = '#ef4444'
-    html = (
-        '<div style="padding:16px;border-radius:10px;background:' + color + '1A;border:2px solid ' + color + ';margin:12px 0">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;font-size:1.05rem;">' +
-        '<div><b>Risk level:</b> ' + label + '</div>' +
-        '<div><b>' + str(int(round(p*100))) + '%</b></div>' +
-        '</div>' +
-        '<div style="height:12px;background:#e5e7eb;border-radius:8px;margin-top:10px;">' +
-        '<div style="width:' + str(int(round(p*100))) + '%;height:12px;background:' + color + ';border-radius:8px;"></div>' +
-        '</div>' +
-        '</div>'
-    )
-    _st.markdown(html, unsafe_allow_html = True)
-
-
-# --- App Configuration ---
-st.set_page_config(
-    page_title="Dissertation Model Predictor",
-    page_icon="🤖",
-    layout="wide"
-)
+st.set_page_config(page_title="NAFLD Lifestyle Risk Predictor", layout="wide")
+st.title("🤖 NAFLD Lifestyle Risk Predictor")
+st.caption("Enter values for the model features to get a prediction. Use the sidebar to choose the model file and connect to MongoDB.")
 
 # Force Matplotlib to use Agg backend to prevent rendering issues in Streamlit
 plt.style.use('default')
 plt.switch_backend('Agg')
 
 # --- MongoDB Connection ---
-# The connection string is now read securely from st.secrets.
+# This block connects to MongoDB and displays a connection status in the sidebar.
 try:
     MONGODB_CONNECTION_STRING = st.secrets["mongo"]["connection_string"]
-    DB_NAME = st.secrets["mongo"]["db_name"]
-    COLLECTION_NAME = st.secrets["mongo"]["collection_name"]
-except KeyError:
-    st.error("MongoDB secrets are not configured. Please add your credentials to the Streamlit secrets.")
-    st.stop()
-
-@st.cache_resource
-def get_mongo_client():
-    """
-    Connects to the MongoDB Atlas cluster.
-    """
-    try:
-        client = MongoClient(MONGODB_CONNECTION_STRING, server_api=ServerApi('1'), tls=True, tlsCAFile=certifi.where())
-        client.admin.command('ping')
-        return client
-    except Exception as e:
-        st.error(f"Error connecting to MongoDB: {e}")
-        return None
-
-mongo_client = get_mongo_client()
-if mongo_client:
-    db = mongo_client[DB_NAME]
-    predictions_collection = db[COLLECTION_NAME]
-else:
-    st.error("Could not connect to the database. The app will not be able to save or load predictions.")
+    db = MongoClient(MONGODB_CONNECTION_STRING, tls=True, tlsCAFile=certifi.where()).get_database(st.secrets["mongo"]["db_name"])
+    predictions_collection = db[st.secrets["mongo"]["collection_name"]]
+    st.sidebar.markdown('### Connection Status')
+    st.sidebar.success("MongoDB Connected ✅")
+except Exception as e:
+    st.sidebar.error("MongoDB Connection Failed ❌")
+    st.sidebar.caption(f"Error: {e}")
     predictions_collection = None
 
 
@@ -191,25 +63,10 @@ def risk_label(p):
     if p < 0.33:
         return "Low", "green"
     if p < 0.66:
-        return "Borderline", "orange"
+        return "Moderate", "orange"
     return "High", "red"
 
-def save_to_mongo(payload, pred, proba):
-    if predictions_collection is None:
-        return
-    try:
-        predictions_collection.insert_one({
-            "_created_at": datetime.utcnow(),
-            "inputs": payload,
-            "prediction": pred,
-            "probability": proba
-        })
-        st.success("Saved to MongoDB")
-    except Exception as e:
-        st.error("Save failed: " + str(e))
-
 # --- UI
-st.title("🤖 NAFLD Lifestyle Risk Predictor")
 st.subheader("User Data Input")
 st.markdown("Enter values for the model's 21 features to get a prediction.")
 
@@ -292,14 +149,14 @@ if model is not None:
         X = pd.DataFrame([full], columns=MODEL_COLS)
         
         prediction = model.predict(X)[0]
-        probabilities = model.predict_proba(X)[0]
-        prediction_probability = probabilities[1] * 100 if len(probabilities) > 1 else 0
+        # This fix handles cases where predict_proba only returns one class
+        probabilities = model.predict_proba(X)
+        prediction_probability = probabilities[0][1] * 100 if probabilities.shape[1] > 1 else 0
 
         # Create a visual progress bar and color-coded label
         col_pred, col_report = st.columns([3, 1])
         with col_pred:
-            risk_label = "High Risk" if prediction_probability >= 70 else "Moderate Risk" if prediction_probability >= 30 else "Low Risk"
-            risk_color = "red" if prediction_probability >= 70 else "orange" if prediction_probability >= 30 else "green"
+            risk_label, risk_color = risk_label(prediction_probability / 100)
             st.markdown(f"### Predicted NAFLD Risk: **<span style='color:{risk_color}'>{prediction_probability:.2f}% ({risk_label})</span>**", unsafe_allow_html=True)
             st.progress(prediction_probability / 100)
             st.markdown("The prediction is based on the features entered.")
@@ -338,6 +195,10 @@ if model is not None:
                 file_name=f"NAFLD_Risk_Report_{datetime.now().strftime('%Y%m%d')}.pdf",
                 mime="application/pdf"
             )
+        
+        # Save prediction to MongoDB
+        if st.button("Save Prediction"):
+            save_to_mongo(full, str(prediction), prediction_probability)
 
         # Create an expandable section for advanced details
         with st.expander("Show Advanced Analysis"):
@@ -354,7 +215,7 @@ if model is not None:
             shap_values = explainer.shap_values(X)
             # Create a Matplotlib figure for the SHAP plot
             fig, ax = plt.subplots(figsize=(10, 6))
-            shap.summary_plot(shap_values[1], X, plot_type="bar", show=False, ax=ax)
+            shap.summary_plot(shap_values, X, plot_type="bar", show=False, ax=ax)
             st.pyplot(fig)
             
             st.markdown("---")
@@ -384,55 +245,3 @@ if model is not None:
     except Exception as e:
         st.error(f"An error occurred during prediction: {e}")
         st.error("Please ensure that all 21 features have valid numerical inputs.")
-
-
-# === Julius patch: robust feature build and probability ===
-try:
-    # Assume you have a dict of current inputs named values_dict or raw_row; try both
-    _vals = values_dict if 'values_dict' in globals() else (raw_row if 'raw_row' in globals() else {})
-    X = _build_X_from_values(_vals)
-    prob = _predict_prob_safe(model, X)
-    render_risk_card(prob)
-except Exception as e:
-    import streamlit as st
-    st.info('Prediction patch error: ' + str(e))
-
-
-
-
-
-# === Julius sidebar: MongoDB connection status (read-only) ===
-try:
-    import streamlit as _st_sb
-    _st_sb.sidebar.markdown('## Connection')
-    # Try common variable names for client and db
-    _client = None
-    _dbobj = None
-    if 'client' in globals():
-        _client = client
-    if 'mongo_client' in globals() and _client is None:
-        _client = mongo_client
-    if 'db' in globals():
-        _dbobj = db
-    if _dbobj is None and _client is not None:
-        try:
-            # Try typical env db name variables
-            _db_name = None
-            for k in ['MONGO_DB','MONGODB_DB','MONGO_DB_NAME','DB_NAME']:
-                if k in os.environ:
-                    _db_name = os.environ[k]
-                    break
-            if _db_name is None:
-                try:
-                    _db_name = _client.list_database_names()[0]
-                except Exception:
-                    _db_name = 'database'
-            _dbobj = _client[_db_name]
-        except Exception:
-            _dbobj = None
-    if _dbobj is not None:
-        _st_sb.sidebar.success('MongoDB: connected')
-    else:
-        _st_sb.sidebar.warning('MongoDB: not connected')
-except Exception:
-    pass
