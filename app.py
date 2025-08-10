@@ -1,14 +1,17 @@
-import pandas as pd
-import joblib
 import streamlit as st
+import pandas as pd
+import numpy as np
+import joblib
+import os
 from datetime import datetime
-from pymongo import MongoClient
+from pymongo.mongo_client import MongoClient
+from pymongo.server_api import ServerApi
+import plotly.express as px
 import certifi
 import shap
 import matplotlib.pyplot as plt
 from fpdf import FPDF
 from io import BytesIO
-from pymongo.server_api import ServerApi
 
 # --- App Configuration ---
 st.set_page_config(
@@ -17,12 +20,9 @@ st.set_page_config(
     layout="wide"
 )
 
-# Force Matplotlib to use Agg backend to prevent rendering issues in Streamlit
-plt.style.use('default')
-plt.switch_backend('Agg')
-
 # --- MongoDB Connection ---
 # The connection string is now read securely from st.secrets.
+# NEVER hardcode passwords or connection strings in your app.py file.
 try:
     MONGODB_CONNECTION_STRING = st.secrets["mongo"]["connection_string"]
     DB_NAME = st.secrets["mongo"]["db_name"]
@@ -37,6 +37,8 @@ def get_mongo_client():
     Connects to the MongoDB Atlas cluster.
     """
     try:
+        # This fix uses the certifi library to resolve SSL handshake issues.
+        # It ensures a secure connection is made successfully from Streamlit's servers.
         client = MongoClient(MONGODB_CONNECTION_STRING, server_api=ServerApi('1'), tls=True, tlsCAFile=certifi.where())
         client.admin.command('ping')
         return client
@@ -102,6 +104,7 @@ def save_to_mongo(payload, pred, proba):
         st.error("Save failed: " + str(e))
 
 # --- UI
+st.title("🤖 NAFLD Lifestyle Risk Predictor")
 st.subheader("User Data Input")
 st.markdown("Enter values for the model's 21 features to get a prediction.")
 
@@ -185,7 +188,7 @@ if model is not None:
         
         prediction = model.predict(X)[0]
         probabilities = model.predict_proba(X)[0]
-        prediction_probability = probabilities[1] * 100
+        prediction_probability = probabilities[1] * 100 if len(probabilities) > 1 else 0
 
         # Create a visual progress bar and color-coded label
         col_pred, col_report = st.columns([3, 1])
@@ -243,7 +246,7 @@ if model is not None:
                 return shap.TreeExplainer(_model)
             
             explainer = get_explainer(model)
-            shap_values = explainer.shap_values(X)[1]
+            shap_values = explainer.shap_values(X)
             # Create a Matplotlib figure for the SHAP plot
             fig, ax = plt.subplots(figsize=(10, 6))
             shap.summary_plot(shap_values, X, plot_type="bar", show=False, ax=ax)
