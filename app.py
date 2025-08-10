@@ -5,7 +5,7 @@ import joblib
 import os
 from datetime import datetime
 from pymongo.mongo_client import MongoClient
-from pymongo.server_api import ServerApi
+from pAymongo.server_api import ServerApi
 import plotly.express as px
 import certifi
 import shap
@@ -25,7 +25,7 @@ plt.style.use('default')
 plt.switch_backend('Agg')
 
 # --- MongoDB Connection ---
-# This block connects to MongoDB and displays a connection status in the sidebar.
+# The connection string is now read securely from st.secrets.
 try:
     MONGODB_CONNECTION_STRING = st.secrets["mongo"]["connection_string"]
     db = MongoClient(MONGODB_CONNECTION_STRING, tls=True, tlsCAFile=certifi.where()).get_database(st.secrets["mongo"]["db_name"])
@@ -87,6 +87,7 @@ def save_to_mongo(payload, pred, proba):
         st.error("Save failed: " + str(e))
 
 # --- UI
+st.title("🤖 NAFLD Lifestyle Risk Predictor")
 st.subheader("User Data Input")
 st.markdown("Enter values for the model's 21 features to get a prediction.")
 
@@ -164,107 +165,104 @@ st.header("Prediction Result")
 st.markdown("Adjust the inputs in the sidebar to see the prediction update in real-time.")
 
 if model is not None:
-    try:
-        full = encode_inputs()
-        X = pd.DataFrame([full], columns=MODEL_COLS)
-        
-        prediction = model.predict(X)[0]
-        # This fix handles cases where predict_proba only returns one class
-        probabilities = model.predict_proba(X)
-        prediction_probability = probabilities[0][1] * 100 if probabilities.shape[1] > 1 else 0
-
-        # Create a visual progress bar and color-coded label
-        col_pred, col_report = st.columns([3, 1])
-        with col_pred:
-            risk_label, risk_color = risk_label(prediction_probability / 100)
-            st.markdown(f"### Predicted NAFLD Risk: **<span style='color:{risk_color}'>{prediction_probability:.2f}% ({risk_label})</span>**", unsafe_allow_html=True)
-            st.progress(prediction_probability / 100)
-            st.markdown("The prediction is based on the features entered.")
-        
-        # Helper function for PDF report generation
-        def create_pdf(inputs, prediction_prob, risk_label):
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Arial", size=12)
-            pdf.cell(200, 10, txt="NAFLD Risk Prediction Report", ln=1, align="C")
-            pdf.ln(10)
+    # Place prediction logic inside a button to force re-execution
+    if st.button("Get Prediction"):
+        try:
+            full = encode_inputs()
+            X = pd.DataFrame([full], columns=MODEL_COLS)
             
-            pdf.set_font("Arial", size=10)
-            pdf.cell(200, 10, txt=f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=1)
-            pdf.cell(200, 10, txt="---", ln=1)
-            
-            pdf.set_font("Arial", style='B', size=10)
-            pdf.cell(200, 10, txt="Predicted Risk:", ln=1)
-            pdf.set_font("Arial", size=10)
-            pdf.cell(200, 10, txt=f"Risk: {prediction_prob:.2f}% ({risk_label})", ln=1)
-            pdf.cell(200, 10, txt="", ln=1)
+            prediction = model.predict(X)[0]
+            # This fix handles cases where predict_proba only returns one class
+            probabilities = model.predict_proba(X)
+            prediction_probability = probabilities[0][1] * 100 if probabilities.shape[1] > 1 else 0
 
-            pdf.set_font("Arial", style='B', size=10)
-            pdf.cell(200, 10, txt="Input Data:", ln=1)
-            pdf.set_font("Arial", size=10)
-            for key, value in inputs.items():
-                pdf.cell(200, 5, txt=f"{key}: {value}", ln=1)
+            # Create a visual progress bar and color-coded label
+            col_pred, col_report = st.columns([3, 1])
+            with col_pred:
+                risk_label, risk_color = risk_label(prediction_probability / 100)
+                st.markdown(f"### Predicted NAFLD Risk: **<span style='color:{risk_color}'>{prediction_probability:.2f}% ({risk_label})</span>**", unsafe_allow_html=True)
+                st.progress(prediction_probability / 100)
+                st.markdown("The prediction is based on the features entered.")
             
-            return pdf
+            # Helper function for PDF report generation
+            def create_pdf(inputs, prediction_prob, risk_label):
+                pdf = FPDF()
+                pdf.add_page()
+                pdf.set_font("Arial", size=12)
+                pdf.cell(200, 10, txt="NAFLD Risk Prediction Report", ln=1, align="C")
+                pdf.ln(10)
+                
+                pdf.set_font("Arial", size=10)
+                pdf.cell(200, 10, txt=f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=1)
+                pdf.cell(200, 10, txt="---", ln=1)
+                
+                pdf.set_font("Arial", style='B', size=10)
+                pdf.cell(200, 10, txt="Predicted Risk:", ln=1)
+                pdf.set_font("Arial", size=10)
+                pdf.cell(200, 10, txt=f"Risk: {prediction_prob:.2f}% ({risk_label})", ln=1)
+                pdf.cell(200, 10, txt="", ln=1)
 
-        with col_report:
-            pdf = create_pdf(full, prediction_probability, risk_label)
-            st.download_button(
-                "Download Report",
-                data=BytesIO(pdf.output(dest='S').encode("latin-1")),
-                file_name=f"NAFLD_Risk_Report_{datetime.now().strftime('%Y%m%d')}.pdf",
-                mime="application/pdf"
-            )
-        
-        # Save prediction to MongoDB
-        if st.button("Save Prediction"):
+                pdf.set_font("Arial", style='B', size=10)
+                pdf.cell(200, 10, txt="Input Data:", ln=1)
+                pdf.set_font("Arial", size=10)
+                for key, value in inputs.items():
+                    pdf.cell(200, 5, txt=f"{key}: {value}", ln=1)
+                
+                return pdf
+
+            with col_report:
+                pdf = create_pdf(full, prediction_probability, risk_label)
+                st.download_button(
+                    "Download Report",
+                    data=BytesIO(pdf.output(dest='S').encode("latin-1")),
+                    file_name=f"NAFLD_Risk_Report_{datetime.now().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf"
+                )
+            
             save_to_mongo(full, str(prediction), prediction_probability)
 
-        # Create an expandable section for advanced details
-        with st.expander("Show Advanced Analysis"):
-            # SHAP Analysis
-            st.subheader("Model Explainability (SHAP)")
-            st.markdown("The chart below shows how each feature contributed to the predicted risk. Red bars increase risk, while blue bars decrease it.")
-            
-            # Cache the SHAP explainer for performance
-            @st.cache_resource
-            def get_explainer(_model):
-                return shap.TreeExplainer(_model)
-            
-            explainer = get_explainer(model)
-            # This fix ensures shap_values are calculated correctly and avoids the index out of bounds error
-            shap_values = explainer.shap_values(X)
-            
-            # Create a Matplotlib figure for the SHAP plot
-            fig, ax = plt.subplots(figsize=(10, 6))
-            # This fix ensures the SHAP plot is a bar chart and displays correctly
-            shap.summary_plot(shap_values, X, plot_type="bar", show=False)
-            st.pyplot(fig)
-            
-            st.markdown("---")
-            st.subheader("Input Data Summary")
-            st.dataframe(pd.DataFrame([full]).T)
+            # Create an expandable section for advanced details
+            with st.expander("Show Advanced Analysis"):
+                # SHAP Analysis
+                st.subheader("Model Explainability (SHAP)")
+                st.markdown("The chart below shows how each feature contributed to the predicted risk. Red bars increase risk, while blue bars decrease it.")
+                
+                # Cache the SHAP explainer for performance
+                @st.cache_resource
+                def get_explainer(_model):
+                    return shap.TreeExplainer(_model)
+                
+                explainer = get_explainer(model)
+                shap_values = explainer.shap_values(X)
+                # Create a Matplotlib figure for the SHAP plot
+                fig, ax = plt.subplots(figsize=(10, 6))
+                shap.summary_plot(shap_values, X, plot_type="bar", show=False)
+                st.pyplot(fig)
+                
+                st.markdown("---")
+                st.subheader("Input Data Summary")
+                st.dataframe(pd.DataFrame([full]).T)
 
-            # --- Saved Data Section ---
-            st.subheader("Raw Saved Data")
-            if predictions_collection is not None:
-                if st.button('Refresh Saved Predictions'):
-                    try:
-                        saved_predictions = list(predictions_collection.find())
-                        if saved_predictions:
-                            df_predictions = pd.DataFrame(saved_predictions)
-                            # Remove MongoDB's default _id column for display
-                            if '_id' in df_predictions.columns:
-                                df_predictions = df_predictions.drop(columns=['_id'])
-                            st.dataframe(df_predictions)
-                        else:
-                            st.info("No saved predictions found.")
-                    except Exception as e:
-                        st.error(f"Error retrieving predictions: {e}")
-            else:
-                st.error("Cannot retrieve predictions. Not connected to MongoDB.")
+                # --- Saved Data Section ---
+                st.subheader("Raw Saved Data")
+                if predictions_collection is not None:
+                    if st.button('Refresh Saved Predictions'):
+                        try:
+                            saved_predictions = list(predictions_collection.find())
+                            if saved_predictions:
+                                df_predictions = pd.DataFrame(saved_predictions)
+                                # Remove MongoDB's default _id column for display
+                                if '_id' in df_predictions.columns:
+                                    df_predictions = df_predictions.drop(columns=['_id'])
+                                st.dataframe(df_predictions)
+                            else:
+                                st.info("No saved predictions found.")
+                        except Exception as e:
+                            st.error(f"Error retrieving predictions: {e}")
+                else:
+                    st.error("Cannot retrieve predictions. Not connected to MongoDB.")
 
 
-    except Exception as e:
-        st.error(f"An error occurred during prediction: {e}")
-        st.error("Please ensure that all 21 features have valid numerical inputs.")
+        except Exception as e:
+            st.error(f"An error occurred during prediction: {e}")
+            st.error("Please ensure that all 21 features have valid numerical inputs.")
