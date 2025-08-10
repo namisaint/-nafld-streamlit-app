@@ -7,7 +7,7 @@ import certifi
 
 
 # === Risk Card (Step 1b) ===
-import streamlit as st as _st_step1b
+import streamlit as _st_step1b
 
 def render_risk_card(prob):
     try:
