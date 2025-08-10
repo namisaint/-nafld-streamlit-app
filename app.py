@@ -1,58 +1,34 @@
-import streamlit as st
 import pandas as pd
-import numpy as np
 import joblib
-import os
+import streamlit as st
 from datetime import datetime
-from pymongo.mongo_client import MongoClient
-from pymongo.server_api import ServerApi
-import plotly.express as px
+from pymongo import MongoClient
 import certifi
 import shap
 import matplotlib.pyplot as plt
 from fpdf import FPDF
 from io import BytesIO
+from pymongo.server_api import ServerApi
 
-# --- App Configuration ---
-st.set_page_config(
-    page_title="Dissertation Model Predictor",
-    page_icon="�",
-    layout="wide"
-)
+st.set_page_config(page_title="NAFLD Lifestyle Risk Predictor", layout="wide")
+st.title("🤖 NAFLD Lifestyle Risk Predictor")
+st.caption("Enter values for the model features to get a prediction. Use the sidebar to choose the model file and connect to MongoDB.")
 
 # Force Matplotlib to use Agg backend to prevent rendering issues in Streamlit
 plt.style.use('default')
 plt.switch_backend('Agg')
 
 # --- MongoDB Connection ---
-# The connection string is now read securely from st.secrets.
+# This block connects to MongoDB and displays a connection status in the sidebar.
 try:
     MONGODB_CONNECTION_STRING = st.secrets["mongo"]["connection_string"]
-    DB_NAME = st.secrets["mongo"]["db_name"]
-    COLLECTION_NAME = st.secrets["mongo"]["collection_name"]
-except KeyError:
-    st.error("MongoDB secrets are not configured. Please add your credentials to the Streamlit secrets.")
-    st.stop()
-
-@st.cache_resource
-def get_mongo_client():
-    """
-    Connects to the MongoDB Atlas cluster.
-    """
-    try:
-        client = MongoClient(MONGODB_CONNECTION_STRING, server_api=ServerApi('1'), tls=True, tlsCAFile=certifi.where())
-        client.admin.command('ping')
-        return client
-    except Exception as e:
-        st.error(f"Error connecting to MongoDB: {e}")
-        return None
-
-mongo_client = get_mongo_client()
-if mongo_client:
-    db = mongo_client[DB_NAME]
-    predictions_collection = db[COLLECTION_NAME]
-else:
-    st.error("Could not connect to the database. The app will not be able to save or load predictions.")
+    db = MongoClient(MONGODB_CONNECTION_STRING, tls=True, tlsCAFile=certifi.where()).get_database(st.secrets["mongo"]["db_name"])
+    predictions_collection = db[st.secrets["mongo"]["collection_name"]]
+    st.sidebar.markdown('### Connection Status')
+    st.sidebar.success("MongoDB Connected ✅")
+except Exception as e:
+    st.sidebar.error("MongoDB Connection Failed ❌")
+    st.sidebar.caption(f"Error: {e}")
     predictions_collection = None
 
 
@@ -105,7 +81,6 @@ def save_to_mongo(payload, pred, proba):
         st.error("Save failed: " + str(e))
 
 # --- UI
-st.title("🤖 NAFLD Lifestyle Risk Predictor")
 st.subheader("User Data Input")
 st.markdown("Enter values for the model's 21 features to get a prediction.")
 
@@ -281,7 +256,6 @@ if model is not None:
                     st.error("Cannot retrieve predictions. Not connected to MongoDB.")
 
 
-    except Exception as e:
-        st.error(f"An error occurred during prediction: {e}")
-        st.error("Please ensure that all 21 features have valid numerical inputs.")
-�
+        except Exception as e:
+            st.error(f"An error occurred during prediction: {e}")
+            st.error("Please ensure that all 21 features have valid numerical inputs.")
