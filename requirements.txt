@@ -7,3 +7,6 @@ pymongo
 certifi
 matplotlib
 seaborn
+shap
+streamlit-shap
+jinja2
