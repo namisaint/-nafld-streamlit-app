@@ -1,18 +1,24 @@
-import pandas as pd
-import joblib
 import streamlit as st
+import pandas as pd
+import numpy as np
+import joblib
+import os
 from datetime import datetime
-from pymongo import MongoClient
+from pymongo.mongo_client import MongoClient
+from pymongo.server_api import ServerApi
+import plotly.express as px
 import certifi
 import shap
 import matplotlib.pyplot as plt
 from fpdf import FPDF
 from io import BytesIO
-from pymongo.server_api import ServerApi
 
-st.set_page_config(page_title="NAFLD Lifestyle Risk Predictor", layout="wide")
-st.title("🤖 NAFLD Lifestyle Risk Predictor")
-st.caption("Enter values for the model features to get a prediction. Use the sidebar to connect to MongoDB and choose the model file.")
+# --- App Configuration ---
+st.set_page_config(
+    page_title="Dissertation Model Predictor",
+    page_icon="🤖",
+    layout="wide"
+)
 
 # Force Matplotlib to use Agg backend to prevent rendering issues in Streamlit
 plt.style.use('default')
@@ -85,10 +91,10 @@ def risk_label(p):
     return "High", "red"
 
 def save_to_mongo(payload, pred, proba):
-    if "mongo_db" not in st.session_state:
+    if predictions_collection is None:
         return
     try:
-        st.session_state["mongo_db"]["predictions"].insert_one({
+        predictions_collection.insert_one({
             "_created_at": datetime.utcnow(),
             "inputs": payload,
             "prediction": pred,
@@ -99,6 +105,7 @@ def save_to_mongo(payload, pred, proba):
         st.error("Save failed: " + str(e))
 
 # --- UI
+st.title("🤖 NAFLD Lifestyle Risk Predictor")
 st.subheader("User Data Input")
 st.markdown("Enter values for the model's 21 features to get a prediction.")
 
@@ -243,7 +250,7 @@ if model is not None:
             shap_values = explainer.shap_values(X)
             # Create a Matplotlib figure for the SHAP plot
             fig, ax = plt.subplots(figsize=(10, 6))
-            shap.summary_plot(shap_values, X, plot_type="bar", show=False, ax=ax)
+            shap.summary_plot(shap_values[1], X, plot_type="bar", show=False, ax=ax)
             st.pyplot(fig)
             
             st.markdown("---")
@@ -253,9 +260,9 @@ if model is not None:
             # --- Saved Data Section ---
             st.subheader("Raw Saved Data")
             if st.button('Refresh Saved Predictions'):
-                if 'mongo_db' in st.session_state:
+                if predictions_collection is not None:
                     try:
-                        saved_predictions = list(st.session_state["mongo_db"]["predictions"].find())
+                        saved_predictions = list(predictions_collection.find())
                         if saved_predictions:
                             df_predictions = pd.DataFrame(saved_predictions)
                             # Remove MongoDB's default _id column for display
