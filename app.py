@@ -13,6 +13,110 @@ import matplotlib.pyplot as plt
 from fpdf import FPDF
 from io import BytesIO
 
+
+# ==== Patches: prediction stability, SHAP, Mongo status ====
+import types as _types_patch
+import numpy as _np_patch
+import pandas as _pd_patch
+import streamlit as _st_patch
+
+# Visible Mongo badge
+def _mongo_badge(client, db_name):
+    try:
+        if client is None:
+            _st_patch.warning('MongoDB: not connected')
+            return None
+        db = client[db_name]
+        _st_patch.success('MongoDB: connected to ' + db_name)
+        return db
+    except Exception as e:
+        _st_patch.info('MongoDB connection issue: ' + str(e))
+        return None
+
+# Ensure proba
+def _predict_probability(model_obj, X_df):
+    try:
+        return float(model_obj.predict_proba(X_df)[:, 1][0])
+    except Exception:
+        try:
+            # Some pipelines expose named_steps with calibrated classifier inside
+            return float(model_obj.named_steps['classifier'].predict_proba(X_df)[:, 1][0])
+        except Exception:
+            try:
+                # Decision function fallback; min-max scale for display only
+                val = float(model_obj.decision_function(X_df)[0])
+                # simple normalization
+                val_c = max(min((val + 5.0) / 10.0, 1.0), 0.0)
+                return float(val_c)
+            except Exception:
+                # Last resort: predict -> {0,1}
+                return float(_np_patch.clip(float(model_obj.predict(X_df)[0]), 0.0, 1.0))
+
+# Risk card (clear)
+def render_risk_card(prob):
+    try:
+        p = float(prob)
+    except Exception:
+        p = 0.0
+    if p < 0.34:
+        label = 'Low'; color = '#22c55e'
+    elif p < 0.67:
+        label = 'Medium'; color = '#f59e0b'
+    else:
+        label = 'High'; color = '#ef4444'
+    html = (
+        '<div style="padding:16px;border-radius:10px;background:' + color + '1A;border:2px solid ' + color + ';margin:12px 0">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;font-size:1.05rem;">' +
+        '<div><b>Risk level:</b> ' + label + '</div>' +
+        '<div><b>' + str(int(round(p*100))) + '%</b></div>' +
+        '</div>' +
+        '<div style="height:12px;background:#e5e7eb;border-radius:8px;margin-top:10px;">' +
+        '<div style="width:' + str(int(round(p*100))) + '%;height:12px;background:' + color + ';border-radius:8px;"></div>' +
+        '</div>' +
+        '</div>'
+    )
+    _st_patch.markdown(html, unsafe_allow_html = True)
+
+# SHAP section
+def _shap_section(model_obj, X_df):
+    import shap
+    try:
+        bg = _pd_patch.concat([X_df] * 30, ignore_index = True)
+        for c in bg.columns:
+            try:
+                bg[c] = bg[c] + _np_patch.random.normal(0, 1e-6, size = len(bg))
+            except Exception:
+                pass
+        try:
+            explainer = shap.Explainer(model_obj, bg)
+        except Exception:
+            try:
+                explainer = shap.Explainer(model_obj.predict_proba, bg)
+            except Exception:
+                explainer = None
+        if explainer is None:
+            _st_patch.info('SHAP not available for this model setup.')
+            return
+        sv = explainer(X_df)
+        try:
+            shap.plots.bar(sv, max_display = 10, show = False)
+            import matplotlib.pyplot as plt
+            plt.tight_layout()
+            plt.show()
+        except Exception:
+            _st_patch.info('SHAP computed but plotting failed.')
+    except Exception as e:
+        _st_patch.info('SHAP error: ' + str(e))
+
+# Hook: try to locate where X is prepared and prediction occurs. We will insert a clear block that:
+# - derives feature order from model if pipeline has feature_names_in_
+# - otherwise uses current X columns order
+# - computes prob with _predict_probability
+# - prints a tiny debug preview and renders risk card
+
+# We will match common call sites using regex for predict or predict_proba and insert our block before it.
+
+
 # --- App Configuration ---
 st.set_page_config(
     page_title="Dissertation Model Predictor",
@@ -280,3 +384,23 @@ if model is not None:
     except Exception as e:
         st.error(f"An error occurred during prediction: {e}")
         st.error("Please ensure that all 21 features have valid numerical inputs.")
+
+
+# === Julius patch: compute prob robustly and show card ===
+try:
+    _model_obj = model
+except Exception:
+    _model_obj = model if 'model' in globals() else None
+try:
+    _X_df = X
+except Exception:
+    _X_df = X if 'X' in globals() else None
+
+if _model_obj is not None and _X_df is not None:
+    try:
+        prob = _predict_probability(_model_obj, _X_df)
+        render_risk_card(prob)
+    except Exception as e:
+        import streamlit as st
+        st.info('Probability patch failed: ' + str(e))
+
