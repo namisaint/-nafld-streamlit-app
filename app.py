@@ -34,12 +34,12 @@ with st.sidebar:
     cs = st.text_input("Connection String", value=cs_default, type="password", key="mongo_uri_input")
     dbn = st.text_input("Database Name", value=dbn_default, key="mongo_db_name_input")
 
-    if st.button("Connect", key="mongo_connect_btn"):
+    if st.button("Connect"):
         try:
             client = MongoClient(cs, tls=True, tlsCAFile=certifi.where())
             client.admin.command("ping")
             st.session_state["mongo_db"] = client[dbn]
-            st.success("Connected to database: " + dbn)
+            st.success("Connected to " + dbn)
         except Exception as e:
             st.error("Mongo connection failed: " + str(e))
 
@@ -222,8 +222,8 @@ if model is not None:
             
             # Cache the SHAP explainer for performance
             @st.cache_resource
-            def get_explainer(model):
-                return shap.TreeExplainer(model)
+            def get_explainer(_model):
+                return shap.TreeExplainer(_model)
             
             explainer = get_explainer(model)
             shap_values = explainer.shap_values(X)[1]
@@ -256,4 +256,3 @@ if model is not None:
     except Exception as e:
         st.error(f"An error occurred during prediction: {e}")
         st.error("Please ensure that all 21 features have valid numerical inputs.")
-
