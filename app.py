@@ -2,15 +2,16 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
+import os
 from datetime import datetime
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 import plotly.express as px
 import certifi
+import shap
 import matplotlib.pyplot as plt
 from fpdf import FPDF
 from io import BytesIO
-import shap
 
 # --- App Configuration ---
 st.set_page_config(
@@ -37,21 +38,19 @@ except Exception as e:
     predictions_collection = None
 
 
+@st.cache_resource
 def load_model(path):
     try:
-        model = joblib.load(path)
-        return model
+        return joblib.load(path)
     except Exception as e:
         st.error("Error loading model: " + str(e))
         return None
-
 
 # Sidebar: Model file
 with st.sidebar:
     st.header("Model")
     model_path = st.text_input("Model file path", value="rf_lifestyle_model (1).pkl")
 
-# Load the model every time
 model = load_model(model_path)
 
 # Try to read expected columns from model
@@ -87,9 +86,7 @@ def save_to_mongo(payload, pred, proba):
     except Exception as e:
         st.error("Save failed: " + str(e))
 
-
-# --- UI ---
-st.title("🤖 NAFLD Lifestyle Risk Predictor")
+# --- UI
 st.subheader("User Data Input")
 st.markdown("Enter values for the model's 21 features to get a prediction.")
 
@@ -167,6 +164,7 @@ st.header("Prediction Result")
 st.markdown("Adjust the inputs in the sidebar to see the prediction update in real-time.")
 
 if model is not None:
+    # Place prediction logic inside a button to force re-execution
     if st.button("Get Prediction"):
         try:
             full = encode_inputs()
@@ -225,7 +223,7 @@ if model is not None:
             # Create an expandable section for advanced details
             with st.expander("Show Advanced Analysis"):
                 # SHAP Analysis
-                
+                st.subheader("Model Explainability (SHAP)")
                 st.markdown("The chart below shows how each feature contributed to the predicted risk. Red bars increase risk, while blue bars decrease it.")
                 
                 # Cache the SHAP explainer for performance
@@ -235,8 +233,9 @@ if model is not None:
                 
                 explainer = get_explainer(model)
                 shap_values = explainer.shap_values(X)
+                # Create a Matplotlib figure for the SHAP plot
                 fig, ax = plt.subplots(figsize=(10, 6))
-                shap.summary_plot(shap_values[1], X, plot_type="bar", show=False, ax=ax)
+                shap.summary_plot(shap_values, X, plot_type="bar", show=False)
                 st.pyplot(fig)
                 
                 st.markdown("---")
