@@ -89,4 +89,4 @@ def encode_inputs():
         "Is_Smoker_Cat": 1 if smoking_status == "Yes" else 0,
         "SLD012": 1 if sleep_disorder == "Yes" else 0,
         "SLQ050": float(sleep_hours),
-        "SLQ120": int(work_hours
+        "SLQ120": int(work_hours ),
