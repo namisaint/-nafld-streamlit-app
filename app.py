@@ -5,35 +5,6 @@ from datetime import datetime
 from pymongo import MongoClient
 import certifi
 
-
-# === Risk Card (Step 1b) ===
-import streamlit as _st_step1b
-
-def render_risk_card(prob):
-    try:
-        p = float(prob)
-    except Exception:
-        p = 0.0
-    if p < 0.34:
-        label = 'Low'; color = '#22c55e'
-    elif p < 0.67:
-        label = 'Medium'; color = '#f59e0b'
-    else:
-        label = 'High'; color = '#ef4444'
-    html = (
-        '<div style="padding:16px;border-radius:10px;background:' + color + '1A;border:2px solid ' + color + ';margin:12px 0">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;font-size:1.05rem;">' +
-        '<div><b>Risk level:</b> ' + label + '</div>' +
-        '<div><b>' + str(int(round(p*100))) + '%</b></div>' +
-        '</div>' +
-        '<div style="height:12px;background:#e5e7eb;border-radius:8px;margin-top:10px;">' +
-        '<div style="width:' + str(int(round(p*100))) + '%;height:12px;background:' + color + ';border-radius:8px;"></div>' +
-        '</div>' +
-        '</div>'
-    )
-    _st_step1b.markdown(html, unsafe_allow_html = True)
-
-
 st.set_page_config(page_title = "NAFLD Lifestyle Risk Predictor", layout = "wide")
 st.title("NAFLD Lifestyle Risk Predictor")
 st.caption("Enter values for the model features to get a prediction. Use the sidebar to connect to MongoDB and choose the model file.")
@@ -216,9 +187,7 @@ if submitted:
                 st.markdown("Risk category: **" + label + "**")
                 st.progress(p)
                 st.write("Estimated probability: " + str(pct) + "%")
-                
-render_risk_card(prob)
-st.caption("This is the model’s estimated chance of NAFLD given the inputs. It is not a diagnosis.")
+                st.caption("This is the model’s estimated chance of NAFLD given the inputs. It is not a diagnosis.")
             else:
                 st.write("Predicted class: " + ("Positive" if int(y_pred) == 1 else "Negative"))
                 st.caption("Your model did not provide a probability. Showing the class only.")
