@@ -5,7 +5,7 @@ import joblib
 import os
 from datetime import datetime
 from pymongo.mongo_client import MongoClient
-from pAymongo.server_api import ServerApi
+from pymongo.server_api import ServerApi
 import plotly.express as px
 import certifi
 import shap
@@ -236,7 +236,7 @@ if model is not None:
                 shap_values = explainer.shap_values(X)
                 # Create a Matplotlib figure for the SHAP plot
                 fig, ax = plt.subplots(figsize=(10, 6))
-                shap.summary_plot(shap_values, X, plot_type="bar", show=False)
+                shap.summary_plot(shap_values[1], X, plot_type="bar", show=False, ax=ax)
                 st.pyplot(fig)
                 
                 st.markdown("---")
