@@ -164,7 +164,6 @@ st.header("Prediction Result")
 st.markdown("Adjust the inputs in the sidebar to see the prediction update in real-time.")
 
 if model is not None:
-    # Place prediction logic inside a button to force re-execution
     if st.button("Get Prediction"):
         try:
             full = encode_inputs()
