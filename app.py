@@ -6,7 +6,9 @@ from pymongo import MongoClient
 import certifi
 
 
-# === Risk Card (Step 1) ===
+# === Risk Card (Step 1b) ===
+import streamlit as st as _st_step1b
+
 def render_risk_card(prob):
     try:
         p = float(prob)
@@ -19,18 +21,17 @@ def render_risk_card(prob):
     else:
         label = 'High'; color = '#ef4444'
     html = (
-        '<div style="padding:12px;border-radius:8px;background:' + color + '1A;border:1px solid ' + color + ';margin:6px 0">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-        '<div><b>Risk:</b> ' + label + '</div>' +
-        '<div>' + str(int(round(p*100))) + '%</div>' +
+        '<div style="padding:16px;border-radius:10px;background:' + color + '1A;border:2px solid ' + color + ';margin:12px 0">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;font-size:1.05rem;">' +
+        '<div><b>Risk level:</b> ' + label + '</div>' +
+        '<div><b>' + str(int(round(p*100))) + '%</b></div>' +
         '</div>' +
-        '<div style="height:10px;background:#e5e7eb;border-radius:6px;margin-top:8px;">' +
-        '<div style="width:' + str(int(round(p*100))) + '%;height:10px;background:' + color + ';border-radius:6px;"></div>' +
+        '<div style="height:12px;background:#e5e7eb;border-radius:8px;margin-top:10px;">' +
+        '<div style="width:' + str(int(round(p*100))) + '%;height:12px;background:' + color + ';border-radius:8px;"></div>' +
         '</div>' +
         '</div>'
     )
-    import streamlit as st
-    st.markdown(html, unsafe_allow_html = True)
+    _st_step1b.markdown(html, unsafe_allow_html = True)
 
 
 st.set_page_config(page_title = "NAFLD Lifestyle Risk Predictor", layout = "wide")
@@ -215,7 +216,9 @@ if submitted:
                 st.markdown("Risk category: **" + label + "**")
                 st.progress(p)
                 st.write("Estimated probability: " + str(pct) + "%")
-                st.caption("This is the model’s estimated chance of NAFLD given the inputs. It is not a diagnosis.")
+                
+render_risk_card(prob)
+st.caption("This is the model’s estimated chance of NAFLD given the inputs. It is not a diagnosis.")
             else:
                 st.write("Predicted class: " + ("Positive" if int(y_pred) == 1 else "Negative"))
                 st.caption("Your model did not provide a probability. Showing the class only.")
