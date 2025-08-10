@@ -5,6 +5,34 @@ from datetime import datetime
 from pymongo import MongoClient
 import certifi
 
+
+# === Risk Card (Step 1) ===
+def render_risk_card(prob):
+    try:
+        p = float(prob)
+    except Exception:
+        p = 0.0
+    if p < 0.34:
+        label = 'Low'; color = '#22c55e'
+    elif p < 0.67:
+        label = 'Medium'; color = '#f59e0b'
+    else:
+        label = 'High'; color = '#ef4444'
+    html = (
+        '<div style="padding:12px;border-radius:8px;background:' + color + '1A;border:1px solid ' + color + ';margin:6px 0">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+        '<div><b>Risk:</b> ' + label + '</div>' +
+        '<div>' + str(int(round(p*100))) + '%</div>' +
+        '</div>' +
+        '<div style="height:10px;background:#e5e7eb;border-radius:6px;margin-top:8px;">' +
+        '<div style="width:' + str(int(round(p*100))) + '%;height:10px;background:' + color + ';border-radius:6px;"></div>' +
+        '</div>' +
+        '</div>'
+    )
+    import streamlit as st
+    st.markdown(html, unsafe_allow_html = True)
+
+
 st.set_page_config(page_title = "NAFLD Lifestyle Risk Predictor", layout = "wide")
 st.title("NAFLD Lifestyle Risk Predictor")
 st.caption("Enter values for the model features to get a prediction. Use the sidebar to connect to MongoDB and choose the model file.")
