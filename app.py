@@ -1,28 +1,25 @@
-import streamlit as st
 import pandas as pd
-import numpy as np
 import joblib
-import os
+import streamlit as st
 from datetime import datetime
-from pymongo.mongo_client import MongoClient
-from pymongo.server_api import ServerApi
-import plotly.express as px
+from pymongo import MongoClient
 import certifi
 import shap
 import matplotlib.pyplot as plt
 from fpdf import FPDF
 from io import BytesIO
+from pymongo.server_api import ServerApi
 
-# --- App Configuration ---
-st.set_page_config(
-    page_title="Dissertation Model Predictor",
-    page_icon="🤖",
-    layout="wide"
-)
+st.set_page_config(page_title="NAFLD Lifestyle Risk Predictor", layout="wide")
+st.title("🤖 NAFLD Lifestyle Risk Predictor")
+st.caption("Enter values for the model features to get a prediction. Use the sidebar to connect to MongoDB and choose the model file.")
+
+# Force Matplotlib to use Agg backend to prevent rendering issues in Streamlit
+plt.style.use('default')
+plt.switch_backend('Agg')
 
 # --- MongoDB Connection ---
 # The connection string is now read securely from st.secrets.
-# NEVER hardcode passwords or connection strings in your app.py file.
 try:
     MONGODB_CONNECTION_STRING = st.secrets["mongo"]["connection_string"]
     DB_NAME = st.secrets["mongo"]["db_name"]
@@ -102,7 +99,6 @@ def save_to_mongo(payload, pred, proba):
         st.error("Save failed: " + str(e))
 
 # --- UI
-st.title("🤖 NAFLD Lifestyle Risk Predictor")
 st.subheader("User Data Input")
 st.markdown("Enter values for the model's 21 features to get a prediction.")
 
