@@ -12,8 +12,9 @@ import matplotlib.pyplot as plt
 from fpdf import FPDF
 from io import BytesIO
 
-import pandas as _pd
-import numpy as _np
+import pandas as pd
+import numpy as np
+import streamlit as st
 
 EXPECTED_FEATURES = [
     'Gender','Age in years','Race/Ethnicity','Family income ratio','Smoking status','Sleep Disorder Status',
@@ -59,7 +60,8 @@ def _predict_prob_safe(model_obj, X_df):
             return float(val_c)
         except Exception:
             try:
-                return float(_np.clip(float(model_obj.predict(X_df)[0]), 0.0, 1.0))
+                from numpy import clip as _clip
+                return float(_clip(float(model_obj.predict(X_df)[0]), 0.0, 1.0))
             except Exception:
                 return 0.5
 
@@ -67,7 +69,7 @@ def _build_X(values_dict):
     row = {}
     for k in EXPECTED_FEATURES:
         row[k] = values_dict.get(k, None)
-    X = _pd.DataFrame([row], columns = EXPECTED_FEATURES)
+    X = pd.DataFrame([row], columns = EXPECTED_FEATURES)
     numeric_like = [
         'Age in years','Family income ratio','Sleep duration (hours/day)','Work schedule duration (hours)',
         'Physical activity (minutes/day)','BMI','Alcohol consumption (days/week)','Alcohol drinks per day',
@@ -77,7 +79,7 @@ def _build_X(values_dict):
     ]
     for c in numeric_like:
         if c in X.columns:
-            X[c] = _pd.to_numeric(X[c], errors = 'coerce')
+            X[c] = pd.to_numeric(X[c], errors = 'coerce')
     return X
 
 def render_risk_card(prob):
@@ -91,19 +93,18 @@ def render_risk_card(prob):
         label = 'Moderate'; color = '#f59e0b'
     else:
         label = 'High'; color = '#ef4444'
-    import streamlit as _st
     html = (
-        '<div style='+ 'padding:16px;border-radius:10px;background:' + color + '1A;border:2px solid ' + color + ';margin:12px 0' +'>'+
-        '<div style='+'display:flex;justify-content:space-between;align-items:center;font-size:1.05rem;'+'>'+
-        '<div><b>Risk level:</b> ' + label + '</div>'+
-        '<div><b>' + str(int(round(p*100))) + '%</b></div>'+
-        '</div>'+
-        '<div style='+'height:12px;background:#e5e7eb;border-radius:8px;margin-top:10px;'+'>'+
-        '<div style='+'width:' + str(int(round(p*100))) + '%;height:12px;background:' + color + ';border-radius:8px;'+'></div>'+
-        '</div>'+
+        '<div style=' + 'padding:16px;border-radius:10px;background:' + color + '1A;border:2px solid ' + color + ';margin:12px 0' + '>' +
+        '<div style=' + 'display:flex;justify-content:space-between;align-items:center;font-size:1.05rem;' + '>' +
+        '<div><b>Risk level:</b> ' + label + '</div>' +
+        '<div><b>' + str(int(round(p*100))) + '%</b></div>' +
+        '</div>' +
+        '<div style=' + 'height:12px;background:#e5e7eb;border-radius:8px;margin-top:10px;' + '>' +
+        '<div style=' + 'width:' + str(int(round(p*100))) + '%;height:12px;background:' + color + ';border-radius:8px;' + '></div>' +
+        '</div>' +
         '</div>'
     )
-    _st.markdown(html, unsafe_allow_html = True)
+    st.markdown(html, unsafe_allow_html = True)
 
 
 # --- App Configuration ---
@@ -317,7 +318,7 @@ if model is not None:
             # Create an expandable section for advanced details
             with st.expander("Show Advanced Analysis"):
                 # SHAP Analysis
-                st.subheader("Model Explainability (SHAP)")
+                
                 st.markdown("The chart below shows how each feature contributed to the predicted risk. Red bars increase risk, while blue bars decrease it.")
                 
                 # Cache the SHAP explainer for performance
@@ -361,15 +362,22 @@ if model is not None:
             st.error("Please ensure that all 21 features have valid numerical inputs.")
 
 
-# ==== Julius dynamic prediction block ====
+
+# === Dynamic Prediction (Julius) ===
 try:
-    _values_src = values_dict if 'values_dict' in globals() else (raw_row if 'raw_row' in globals() else {})
-    _X_dyn = _build_X(_values_src)
+    # Build values_dict from session/widgets if present
+    if 'values_dict' not in globals() or not isinstance(values_dict, dict):
+        try:
+            values_dict = dict(st.session_state)
+        except Exception:
+            values_dict = {}
+    X_dyn = _build_X(values_dict)
     if 'model' in globals():
-        prob = _predict_prob_safe(model, _X_dyn)
+        prob = _predict_prob_safe(model, X_dyn)
     else:
         prob = 0.5
-except Exception as _pe:
-    import streamlit as _stp
-    _stp.warning('Prediction error: ' + str(_pe))
-    prob = 0.5
+    st.write('Predicted NAFLD Risk: ' + str(round(prob * 100.0, 2)) + '%')
+    render_risk_card(prob)
+except Exception as e:
+    st.error('Prediction error: ' + str(e))
+
