@@ -80,6 +80,72 @@ with st.sidebar:
         st.error(f"Error: {e}")
 
 
+# --- Function to Encode Inputs ---
+EXPECTED_FEATURES = [
+    'Gender','Age in years','Race/Ethnicity','Family income ratio','Smoking status','Sleep Disorder Status',
+    'Sleep duration (hours/day)','Work schedule duration (hours)','Physical activity (minutes/day)','BMI',
+    'Alcohol consumption (days/week)','Alcohol drinks per day','Number of days drank in the past year',
+    'Max number of drinks on any single day','Alcohol intake frequency (drinks/day)','Total calorie intake (kcal)',
+    'Total protein intake (grams)','Total carbohydrate intake (grams)','Total sugar intake (grams)',
+    'Total fiber intake (grams)','Total fat intake (grams)'
+]
+
+def encode_inputs():
+    gender = st.sidebar.selectbox("Gender", ["Male", "Female"], index=0)
+    age_years = st.sidebar.slider("Age in years", 0, 120, 40, 1)
+    race = st.sidebar.selectbox("Race/Ethnicity", [
+        "Mexican American", "Other Hispanic", "Non-Hispanic White",
+        "Non-Hispanic Black", "Non-Hispanic Asian", "Other Race"
+    ], index=0)
+    family_income_ratio = st.sidebar.slider("Family income ratio", 0.0, 10.0, 2.0, 0.1)
+    smoking_status = st.sidebar.selectbox("Smoking status", ["No", "Yes"], index=0)
+    sleep_disorder = st.sidebar.selectbox("Sleep Disorder Status", ["No", "Yes"], index=0)
+    sleep_duration_hours = st.sidebar.slider("Sleep duration (hours/day)", 0.0, 24.0, 8.0, 0.25)
+    work_hours = st.sidebar.slider("Work schedule duration (hours)", 0, 24, 8, 1)
+    physical_activity_mins = st.sidebar.slider("Physical activity (minutes/day)", 0, 1440, 30, 5)
+    bmi = st.sidebar.slider("BMI", 10.0, 60.0, 25.0, 0.1)
+    alcohol_days_week = st.sidebar.slider("Alcohol consumption (days/week)", 0, 7, 0, 1)
+    alcohol_drinks_per_day = st.sidebar.slider("Alcohol drinks per day", 0, 50, 0, 1)
+    alcohol_days_past_year = st.sidebar.slider("Number of days drank in the past year", 0, 366, 0, 1)
+    alcohol_max_any_day = st.sidebar.slider("Max number of drinks on any single day", 0, 50, 0, 1)
+    alcohol_intake_freq = st.sidebar.slider("Alcohol intake frequency (drinks/day)", 0.0, 50.0, 0.0, 0.1)
+    total_calories = st.sidebar.slider("Total calorie intake (kcal)", 0, 10000, 2000, 50)
+    total_protein = st.sidebar.slider("Total protein intake (grams)", 0, 500, 60, 5)
+    total_carbs = st.sidebar.slider("Total carbohydrate intake (grams)", 0, 1000, 250, 5)
+    total_sugar = st.sidebar.slider("Total sugar intake (grams)", 0, 1000, 40, 5)
+    total_fiber = st.sidebar.slider("Total fiber intake (grams)", 0, 500, 30, 1)
+    total_fat = st.sidebar.slider("Total fat intake (grams)", 0, 500, 70, 1)
+
+    # One-hot encode race categories
+    race_one_hot = {}
+    for r in ["Mexican American", "Other Hispanic", "Non-Hispanic White", "Non-Hispanic Black", "Non-Hispanic Asian", "Other Race"]:
+        key = "RIDRETH3_" + r.replace(" ", "_")
+        race_one_hot[key] = 1 if race == r else 0
+
+    return {
+        "RIAGENDR": 1 if gender == "Male" else 2,
+        "RIDAGEYR": age_years,
+        "INDFMPIR": float(family_income_ratio),
+        "Is_Smoker_Cat": 1 if smoking_status == "Yes" else 0,
+        "SLD012": 1 if sleep_disorder == "Yes" else 0,
+        "SLQ050": float(sleep_duration_hours),
+        "SLQ120": int(work_hours),
+        "PAQ620": int(physical_activity_mins),
+        "BMXBMI": float(bmi),
+        "ALQ111": int(alcohol_days_week),
+        "ALQ121": int(alcohol_drinks_per_day),
+        "ALQ142": int(alcohol_days_past_year),
+        "ALQ151": int(alcohol_max_any_day),
+        "ALQ170": float(alcohol_intake_freq),
+        "DR1TKCAL": int(total_calories),
+        "DR1TPROT": int(total_protein),
+        "DR1TCARB": int(total_carbs),
+        "DR1TSUGR": int(total_sugar),
+        "DR1TFIBE": int(total_fiber),
+        "DR1TTFAT": int(total_fat),
+        **race_one_hot
+    }
+
 # --- Prediction Logic and Display ---
 st.header("Prediction Result")
 st.markdown("Adjust the inputs in the sidebar to see the prediction update in real-time.")
@@ -88,8 +154,8 @@ if model is not None:
     try:
         # Get updated user inputs and encode them for prediction
         full = encode_inputs()
-        X = pd.DataFrame([full], columns=MODEL_COLS)
-        
+        X = pd.DataFrame([full], columns=model.feature_names_in_)
+
         # Predict class probabilities
         prediction = model.predict(X)[0]
         probabilities = model.predict_proba(X)[0]
@@ -117,41 +183,6 @@ if model is not None:
             st.markdown(f"### Predicted NAFLD Risk: **<span style='color:{risk_color}'>{prediction_probability:.2f}% ({risk_label})</span>**", unsafe_allow_html=True)
             st.progress(prediction_probability / 100)  # Progress bar showing the risk percentage
             st.markdown("The prediction is based on the features entered.")
-        
-        # Helper function for PDF report generation
-        def create_pdf(inputs, prediction_prob, risk_label):
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Arial", size=12)
-            pdf.cell(200, 10, txt="NAFLD Risk Prediction Report", ln=1, align="C")
-            pdf.ln(10)
-            
-            pdf.set_font("Arial", size=10)
-            pdf.cell(200, 10, txt=f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=1)
-            pdf.cell(200, 10, txt="---", ln=1)
-            
-            pdf.set_font("Arial", style='B', size=10)
-            pdf.cell(200, 10, txt="Predicted Risk:", ln=1)
-            pdf.set_font("Arial", size=10)
-            pdf.cell(200, 10, txt=f"Risk: {prediction_prob:.2f}% ({risk_label})", ln=1)
-            pdf.cell(200, 10, txt="", ln=1)
-
-            pdf.set_font("Arial", style='B', size=10)
-            pdf.cell(200, 10, txt="Input Data:", ln=1)
-            pdf.set_font("Arial", size=10)
-            for key, value in inputs.items():
-                pdf.cell(200, 5, txt=f"{key}: {value}", ln=1)
-            
-            return pdf
-
-        with col_report:
-            pdf = create_pdf(full, prediction_probability, risk_label)
-            st.download_button(
-                "Download Report",
-                data=BytesIO(pdf.output(dest='S').encode("latin-1")),
-                file_name=f"NAFLD_Risk_Report_{datetime.now().strftime('%Y%m%d')}.pdf",
-                mime="application/pdf"
-            )
 
     except Exception as e:
         st.error(f"An error occurred during prediction: {e}")
