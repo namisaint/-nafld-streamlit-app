@@ -8,10 +8,103 @@ from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 import plotly.express as px
 import certifi
-import shap
 import matplotlib.pyplot as plt
 from fpdf import FPDF
 from io import BytesIO
+
+import pandas as _pd
+import numpy as _np
+
+EXPECTED_FEATURES = [
+    'Gender','Age in years','Race/Ethnicity','Family income ratio','Smoking status','Sleep Disorder Status',
+    'Sleep duration (hours/day)','Work schedule duration (hours)','Physical activity (minutes/day)','BMI',
+    'Alcohol consumption (days/week)','Alcohol drinks per day','Number of days drank in the past year',
+    'Max number of drinks on any single day','Alcohol intake frequency (drinks/day)','Total calorie intake (kcal)',
+    'Total protein intake (grams)','Total carbohydrate intake (grams)','Total sugar intake (grams)',
+    'Total fiber intake (grams)','Total fat intake (grams)'
+]
+
+def _positive_index(model_obj):
+    try:
+        classes = list(model_obj.classes_)
+        if 1 in classes:
+            return classes.index(1)
+        if '1' in classes:
+            return classes.index('1')
+        if True in classes:
+            return classes.index(True)
+        try:
+            nums = [float(x) for x in classes]
+            return nums.index(max(nums))
+        except Exception:
+            return 1 if len(classes) > 1 else 0
+    except Exception:
+        return 1
+
+def _predict_prob_safe(model_obj, X_df):
+    try:
+        pos = _positive_index(model_obj)
+        return float(model_obj.predict_proba(X_df)[0][pos])
+    except Exception:
+        try:
+            clf = getattr(model_obj, 'named_steps', {}).get('classifier', None)
+            if clf is not None and hasattr(clf, 'predict_proba'):
+                pos = _positive_index(clf)
+                return float(clf.predict_proba(X_df)[0][pos])
+        except Exception:
+            pass
+        try:
+            val = float(model_obj.decision_function(X_df)[0])
+            val_c = max(min((val + 5.0) / 10.0, 1.0), 0.0)
+            return float(val_c)
+        except Exception:
+            try:
+                return float(_np.clip(float(model_obj.predict(X_df)[0]), 0.0, 1.0))
+            except Exception:
+                return 0.5
+
+def _build_X(values_dict):
+    row = {}
+    for k in EXPECTED_FEATURES:
+        row[k] = values_dict.get(k, None)
+    X = _pd.DataFrame([row], columns = EXPECTED_FEATURES)
+    numeric_like = [
+        'Age in years','Family income ratio','Sleep duration (hours/day)','Work schedule duration (hours)',
+        'Physical activity (minutes/day)','BMI','Alcohol consumption (days/week)','Alcohol drinks per day',
+        'Number of days drank in the past year','Max number of drinks on any single day',
+        'Alcohol intake frequency (drinks/day)','Total calorie intake (kcal)','Total protein intake (grams)',
+        'Total carbohydrate intake (grams)','Total sugar intake (grams)','Total fiber intake (grams)','Total fat intake (grams)'
+    ]
+    for c in numeric_like:
+        if c in X.columns:
+            X[c] = _pd.to_numeric(X[c], errors = 'coerce')
+    return X
+
+def render_risk_card(prob):
+    try:
+        p = float(prob)
+    except Exception:
+        p = 0.0
+    if p < 0.34:
+        label = 'Low'; color = '#22c55e'
+    elif p < 0.67:
+        label = 'Moderate'; color = '#f59e0b'
+    else:
+        label = 'High'; color = '#ef4444'
+    import streamlit as _st
+    html = (
+        '<div style='+ 'padding:16px;border-radius:10px;background:' + color + '1A;border:2px solid ' + color + ';margin:12px 0' +'>'+
+        '<div style='+'display:flex;justify-content:space-between;align-items:center;font-size:1.05rem;'+'>'+
+        '<div><b>Risk level:</b> ' + label + '</div>'+
+        '<div><b>' + str(int(round(p*100))) + '%</b></div>'+
+        '</div>'+
+        '<div style='+'height:12px;background:#e5e7eb;border-radius:8px;margin-top:10px;'+'>'+
+        '<div style='+'width:' + str(int(round(p*100))) + '%;height:12px;background:' + color + ';border-radius:8px;'+'></div>'+
+        '</div>'+
+        '</div>'
+    )
+    _st.markdown(html, unsafe_allow_html = True)
+
 
 # --- App Configuration ---
 st.set_page_config(
@@ -87,6 +180,7 @@ def save_to_mongo(payload, pred, proba):
         st.error("Save failed: " + str(e))
 
 # --- UI
+st.title("🤖 NAFLD Lifestyle Risk Predictor")
 st.subheader("User Data Input")
 st.markdown("Enter values for the model's 21 features to get a prediction.")
 
@@ -235,7 +329,7 @@ if model is not None:
                 shap_values = explainer.shap_values(X)
                 # Create a Matplotlib figure for the SHAP plot
                 fig, ax = plt.subplots(figsize=(10, 6))
-                shap.summary_plot(shap_values, X, plot_type="bar", show=False)
+                shap.summary_plot(shap_values[1], X, plot_type="bar", show=False, ax=ax)
                 st.pyplot(fig)
                 
                 st.markdown("---")
@@ -265,3 +359,17 @@ if model is not None:
         except Exception as e:
             st.error(f"An error occurred during prediction: {e}")
             st.error("Please ensure that all 21 features have valid numerical inputs.")
+
+
+# ==== Julius dynamic prediction block ====
+try:
+    _values_src = values_dict if 'values_dict' in globals() else (raw_row if 'raw_row' in globals() else {})
+    _X_dyn = _build_X(_values_src)
+    if 'model' in globals():
+        prob = _predict_prob_safe(model, _X_dyn)
+    else:
+        prob = 0.5
+except Exception as _pe:
+    import streamlit as _stp
+    _stp.warning('Prediction error: ' + str(_pe))
+    prob = 0.5
