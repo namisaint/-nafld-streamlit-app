@@ -1,11 +1,30 @@
-
-# Streamlit NAFLD app (fixed probability, consistent risk card, SHAP fallback, Mongo sidebar)
-import os
+import streamlit as st
 import pandas as pd
 import numpy as np
-import streamlit as st
+import joblib
+import os
+from datetime import datetime
+from pymongo.mongo_client import MongoClient
+from pymongo.server_api import ServerApi
+import plotly.express as px
+import certifi
+import shap
+import matplotlib.pyplot as plt
+from fpdf import FPDF
+from io import BytesIO
 
-# --- Helpers ---
+
+# === Julius minimal helpers (no secrets/mongo changes) ===
+import pandas as _pd
+import numpy as _np
+import streamlit as _st
+
+
+# ==== Julius minimal helpers (no secrets/mongo changes) ====
+import pandas as _pd
+import numpy as _np
+import streamlit as _st
+
 EXPECTED_FEATURES = [
     'Gender','Age in years','Race/Ethnicity','Family income ratio','Smoking status','Sleep Disorder Status',
     'Sleep duration (hours/day)','Work schedule duration (hours)','Physical activity (minutes/day)','BMI',
@@ -15,7 +34,7 @@ EXPECTED_FEATURES = [
     'Total fiber intake (grams)','Total fat intake (grams)'
 ]
 
-def _positive_index_safe(model_obj):
+def _positive_index(model_obj):
     try:
         classes = list(model_obj.classes_)
         if 1 in classes:
@@ -34,13 +53,13 @@ def _positive_index_safe(model_obj):
 
 def _predict_prob_safe(model_obj, X_df):
     try:
-        pos = _positive_index_safe(model_obj)
+        pos = _positive_index(model_obj)
         return float(model_obj.predict_proba(X_df)[0][pos])
     except Exception:
         try:
             clf = getattr(model_obj, 'named_steps', {}).get('classifier', None)
             if clf is not None and hasattr(clf, 'predict_proba'):
-                pos = _positive_index_safe(clf)
+                pos = _positive_index(clf)
                 return float(clf.predict_proba(X_df)[0][pos])
         except Exception:
             pass
@@ -50,7 +69,7 @@ def _predict_prob_safe(model_obj, X_df):
             return float(val_c)
         except Exception:
             try:
-                return float(np.clip(float(model_obj.predict(X_df)[0]), 0.0, 1.0))
+                return float(_np.clip(float(model_obj.predict(X_df)[0]), 0.0, 1.0))
             except Exception:
                 return 0.5
 
@@ -58,7 +77,7 @@ def _build_X(values_dict):
     row = {}
     for k in EXPECTED_FEATURES:
         row[k] = values_dict.get(k, None)
-    X = pd.DataFrame([row], columns = EXPECTED_FEATURES)
+    X = _pd.DataFrame([row], columns = EXPECTED_FEATURES)
     numeric_like = [
         'Age in years','Family income ratio','Sleep duration (hours/day)','Work schedule duration (hours)',
         'Physical activity (minutes/day)','BMI','Alcohol consumption (days/week)','Alcohol drinks per day',
@@ -68,7 +87,7 @@ def _build_X(values_dict):
     ]
     for c in numeric_like:
         if c in X.columns:
-            X[c] = pd.to_numeric(X[c], errors = 'coerce')
+            X[c] = _pd.to_numeric(X[c], errors = 'coerce')
     return X
 
 def render_risk_card(prob):
@@ -83,86 +102,463 @@ def render_risk_card(prob):
     else:
         label = 'High'; color = '#ef4444'
     html = (
-        '<div style=' + 'padding:16px;border-radius:10px;background:' + color + '1A;border:2px solid ' + color + ';margin:12px 0' + '>' +
-        '<div style=' + 'display:flex;justify-content:space-between;align-items:center;font-size:1.05rem;' + '>' +
+        '<div style='+ 'padding:16px;border-radius:10px;background:' + color + '1A;border:2px solid ' + color + ';margin:12px 0' +'>'+
+        '<div style='+'display:flex;justify-content:space-between;align-items:center;font-size:1.05rem;'+'>'+
+        '<div><b>Risk level:</b> ' + label + '</div>'+
+        '<div><b>' + str(int(round(p*100))) + '%</b></div>'+
+        '</div>'+
+        '<div style='+'height:12px;background:#e5e7eb;border-radius:8px;margin-top:10px;'+'>'+
+        '<div style='+'width:' + str(int(round(p*100))) + '%;height:12px;background:' + color + ';border-radius:8px;'+'></div>'+
+        '</div>'+
+        '</div>'
+    )
+    _st.markdown(html, unsafe_allow_html = True)
+
+
+EXPECTED_FEATURES = [
+    'Gender','Age in years','Race/Ethnicity','Family income ratio','Smoking status','Sleep Disorder Status',
+    'Sleep duration (hours/day)','Work schedule duration (hours)','Physical activity (minutes/day)','BMI',
+    'Alcohol consumption (days/week)','Alcohol drinks per day','Number of days drank in the past year',
+    'Max number of drinks on any single day','Alcohol intake frequency (drinks/day)','Total calorie intake (kcal)',
+    'Total protein intake (grams)','Total carbohydrate intake (grams)','Total sugar intake (grams)',
+    'Total fiber intake (grams)','Total fat intake (grams)'
+]
+
+def _build_X_from_values(values_dict):
+    # Cast to numeric where possible; if categorical strings expected, leave as-is to let pipeline handle
+    row = {}
+    for k in EXPECTED_FEATURES:
+        v = values_dict.get(k, None)
+        row[k] = v
+    X = _pd.DataFrame([row], columns = EXPECTED_FEATURES)
+    # Coerce numerics where appropriate but ignore errors (pipeline may handle)
+    numeric_like = [
+        'Age in years','Family income ratio','Sleep duration (hours/day)','Work schedule duration (hours)',
+        'Physical activity (minutes/day)','BMI','Alcohol consumption (days/week)','Alcohol drinks per day',
+        'Number of days drank in the past year','Max number of drinks on any single day',
+        'Alcohol intake frequency (drinks/day)','Total calorie intake (kcal)','Total protein intake (grams)',
+        'Total carbohydrate intake (grams)','Total sugar intake (grams)','Total fiber intake (grams)','Total fat intake (grams)'
+    ]
+    for c in numeric_like:
+        if c in X.columns:
+            X[c] = _pd.to_numeric(X[c], errors = 'coerce')
+    return X
+
+def _positive_index(model_obj):
+    try:
+        classes = list(model_obj.classes_)
+        if 1 in classes:
+            return classes.index(1)
+        if '1' in classes:
+            return classes.index('1')
+        if True in classes:
+            return classes.index(True)
+        # default to the larger label as positive if numeric
+        try:
+            nums = [float(x) for x in classes]
+            return nums.index(max(nums))
+        except Exception:
+            return 1 if len(classes) > 1 else 0
+    except Exception:
+        return 1
+
+def _predict_prob_safe(model_obj, X_df):
+    # Prefer predict_proba
+    try:
+        pos = _positive_index(model_obj)
+        return float(model_obj.predict_proba(X_df)[0][pos])
+    except Exception:
+        # Try pipelines exposing inner classifier
+        try:
+            clf = model_obj.named_steps.get('classifier', None)
+            if clf is not None and hasattr(clf, 'predict_proba'):
+                pos = _positive_index(clf)
+                return float(clf.predict_proba(X_df)[0][pos])
+        except Exception:
+            pass
+        # Decision function fallback
+        try:
+            val = float(model_obj.decision_function(X_df)[0])
+            val_c = max(min((val + 5.0) / 10.0, 1.0), 0.0)
+            return float(val_c)
+        except Exception:
+            # Binary predict fallback
+            try:
+                return float(_np.clip(float(model_obj.predict(X_df)[0]), 0.0, 1.0))
+            except Exception:
+                return 0.5
+
+def render_risk_card(prob):
+    try:
+        p = float(prob)
+    except Exception:
+        p = 0.0
+    if p < 0.34:
+        label = 'Low'; color = '#22c55e'
+    elif p < 0.67:
+        label = 'Medium'; color = '#f59e0b'
+    else:
+        label = 'High'; color = '#ef4444'
+    html = (
+        '<div style="padding:16px;border-radius:10px;background:' + color + '1A;border:2px solid ' + color + ';margin:12px 0">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;font-size:1.05rem;">' +
         '<div><b>Risk level:</b> ' + label + '</div>' +
         '<div><b>' + str(int(round(p*100))) + '%</b></div>' +
         '</div>' +
-        '<div style=' + 'height:12px;background:#e5e7eb;border-radius:8px;margin-top:10px;' + '>' +
-        '<div style=' + 'width:' + str(int(round(p*100))) + '%;height:12px;background:' + color + ';border-radius:8px;' + '></div>' +
+        '<div style="height:12px;background:#e5e7eb;border-radius:8px;margin-top:10px;">' +
+        '<div style="width:' + str(int(round(p*100))) + '%;height:12px;background:' + color + ';border-radius:8px;"></div>' +
         '</div>' +
         '</div>'
     )
-    st.markdown(html, unsafe_allow_html = True)
+    _st.markdown(html, unsafe_allow_html = True)
 
-# --- UI skeleton (minimal; your existing UI can remain) ---
-st.title('NAFLD Risk Prediction')
 
-# Placeholder for your existing value collection. We try both values_dict and raw_row if defined by your code.
-values_source = {}
-if 'values_dict' in globals() and isinstance(values_dict, dict):
-    values_source = values_dict
-elif 'raw_row' in globals() and isinstance(raw_row, dict):
-    values_source = raw_row
+# --- App Configuration ---
+st.set_page_config(
+    page_title="Dissertation Model Predictor",
+    page_icon="🤖",
+    layout="wide"
+)
 
-# Validate inputs
-missing = [k for k in EXPECTED_FEATURES if k not in values_source]
-if len(missing) > 0:
-    st.info('Waiting for inputs. Missing: ' + ', '.join(missing))
+# Force Matplotlib to use Agg backend to prevent rendering issues in Streamlit
+plt.style.use('default')
+plt.switch_backend('Agg')
 
-# Build X and predict safely if model exists
-prob = 0.5
-if 'model' in globals():
-    try:
-        X = _build_X(values_source)
-        prob = _predict_prob_safe(model, X)
-    except Exception as e:
-        st.error('Prediction error: ' + str(e))
-else:
-    st.warning('Model not found in current session.')
-
-# Single source of truth for display
-st.subheader('Prediction Result')
-st.write('Adjust the inputs in the sidebar to see the prediction update in real-time.')
-st.write('Predicted NAFLD Risk: ' + str(round(prob * 100, 2)) + '%')
-render_risk_card(prob)
-
-# SHAP analysis (non-blocking)
-with st.expander('Model Explainability (SHAP)'):
-    try:
-        import shap, matplotlib.pyplot as plt
-        if 'model' in globals() and 'X' in locals():
-            bg = pd.concat([X] * 30, ignore_index = True)
-            for c in bg.columns:
-                try:
-                    bg[c] = bg[c] + np.random.normal(0, 1e-6, size = len(bg))
-                except Exception:
-                    pass
-            try:
-                explainer = shap.Explainer(model, bg)
-            except Exception:
-                try:
-                    explainer = shap.Explainer(model.predict_proba, bg)
-                except Exception:
-                    explainer = None
-            if explainer is None:
-                st.info('SHAP not available for this model setup.')
-            else:
-                sv = explainer(X)
-                shap.plots.bar(sv, max_display = 10, show = False)
-                plt.tight_layout()
-                plt.show()
-        else:
-            st.info('Model or inputs not ready for SHAP.')
-    except Exception as e:
-        st.info('SHAP unavailable: ' + str(e))
-
-# Sidebar Mongo badge (does not change your connection code)
-st.sidebar.markdown('## Connection')
+# --- MongoDB Connection ---
+# The connection string is now read securely from st.secrets.
 try:
-    if 'db' in globals() and db is not None:
-        st.sidebar.success('MongoDB: connected')
-    else:
-        st.sidebar.warning('MongoDB: not connected')
+    MONGODB_CONNECTION_STRING = st.secrets["mongo"]["connection_string"]
+    DB_NAME = st.secrets["mongo"]["db_name"]
+    COLLECTION_NAME = st.secrets["mongo"]["collection_name"]
+except KeyError:
+    st.error("MongoDB secrets are not configured. Please add your credentials to the Streamlit secrets.")
+    st.stop()
+
+@st.cache_resource
+def get_mongo_client():
+    """
+    Connects to the MongoDB Atlas cluster.
+    """
+    try:
+        client = MongoClient(MONGODB_CONNECTION_STRING, server_api=ServerApi('1'), tls=True, tlsCAFile=certifi.where())
+        client.admin.command('ping')
+        return client
+    except Exception as e:
+        st.error(f"Error connecting to MongoDB: {e}")
+        return None
+
+mongo_client = get_mongo_client()
+if mongo_client:
+    db = mongo_client[DB_NAME]
+    predictions_collection = db[COLLECTION_NAME]
+else:
+    st.error("Could not connect to the database. The app will not be able to save or load predictions.")
+    predictions_collection = None
+
+
+@st.cache_resource
+def load_model(path):
+    try:
+        return joblib.load(path)
+    except Exception as e:
+        st.error("Error loading model: " + str(e))
+        return None
+
+# Sidebar: Model file
+with st.sidebar:
+    st.header("Model")
+    model_path = st.text_input("Model file path", value="rf_lifestyle_model (1).pkl")
+
+model = load_model(model_path)
+
+# Try to read expected columns from model
+try:
+    MODEL_COLS = list(model.feature_names_in_)
 except Exception:
-    st.sidebar.warning('MongoDB: status unknown')
+    # Fallback to a hardcoded list if model.feature_names_in_ is not available
+    MODEL_COLS = [
+        'RIAGENDR', 'RIDAGEYR', 'RIDRETH3', 'INDFMPIR', 'ALQ111', 'ALQ121', 'ALQ142',
+        'ALQ151', 'ALQ170', 'Is_Smoker_Cat', 'SLQ050', 'SLQ120', 'SLD012', 'DR1TKCAL',
+        'DR1TPROT', 'DR1TCARB', 'DR1TSUGR', 'DR1TFIBE', 'DR1TTFAT', 'PAQ620', 'BMXBMI'
+    ]
+
+# Helpers for nicer output
+def risk_label(p):
+    if p < 0.33:
+        return "Low", "green"
+    if p < 0.66:
+        return "Borderline", "orange"
+    return "High", "red"
+
+def save_to_mongo(payload, pred, proba):
+    if predictions_collection is None:
+        return
+    try:
+        predictions_collection.insert_one({
+            "_created_at": datetime.utcnow(),
+            "inputs": payload,
+            "prediction": pred,
+            "probability": proba
+        })
+        st.success("Saved to MongoDB")
+    except Exception as e:
+        st.error("Save failed: " + str(e))
+
+# --- UI
+st.title("🤖 NAFLD Lifestyle Risk Predictor")
+st.subheader("User Data Input")
+st.markdown("Enter values for the model's 21 features to get a prediction.")
+
+col1, col2, col3 = st.columns(3)
+with col1:
+    gender = st.selectbox("Gender", ["Male", "Female"], index=0)
+    age_years = st.slider("Age in years", 0, 120, 40, 1)
+    race = st.selectbox("Race/Ethnicity", [
+        "Mexican American", "Other Hispanic", "Non-Hispanic White",
+        "Non-Hispanic Black", "Non-Hispanic Asian", "Other Race"
+    ], index=0)
+    family_income_ratio = st.slider("Family income ratio", 0.0, 10.0, 2.0, 0.1)
+    st.info("Family income ratio: Household income divided by the federal poverty level for your household size. • 1.0 means at the poverty threshold. • 1.1 means 10 percent above the poverty threshold. • 2.0 means 200 percent (2x) the poverty threshold. Higher numbers equal higher income relative to poverty level.")
+    smoking_status = st.selectbox("Smoking status", ["No", "Yes"], index=0)
+with col2:
+    sleep_disorder = st.selectbox("Sleep Disorder Status", ["No", "Yes"], index=0)
+    sleep_duration_hours = st.slider("Sleep duration (hours/day)", 0.0, 24.0, 8.0, 0.25)
+    work_hours = st.slider("Work schedule duration (hours)", 0, 24, 8, 1)
+    physical_activity_mins = st.slider("Physical activity (minutes/day)", 0, 1440, 30, 5)
+    bmi = st.slider("BMI", 10.0, 60.0, 25.0, 0.1)
+with col3:
+    alcohol_days_week = st.slider("Alcohol consumption (days/week)", 0, 7, 0, 1)
+    alcohol_drinks_per_day = st.slider("Alcohol drinks per day", 0, 50, 0, 1)
+    alcohol_days_past_year = st.slider("Number of days drank in the past year", 0, 366, 0, 1)
+    alcohol_max_any_day = st.slider("Max number of drinks on any single day", 0, 50, 0, 1)
+    alcohol_intake_freq = st.slider("Alcohol intake frequency (drinks/day)", 0.0, 50.0, 0.0, 0.1)
+
+st.subheader("Nutritional Information")
+col4, col5, col6 = st.columns(3)
+with col4:
+    total_calories = st.slider("Total calorie intake (kcal)", 0, 10000, 2000, 50)
+    total_protein = st.slider("Total protein intake (grams)", 0, 500, 60, 5)
+with col5:
+    total_carbs = st.slider("Total carbohydrate intake (grams)", 0, 1000, 250, 5)
+    total_sugar = st.slider("Total sugar intake (grams)", 0, 1000, 40, 5)
+with col6:
+    total_fiber = st.slider("Total fiber intake (grams)", 0, 500, 30, 1)
+    total_fat = st.slider("Total fat intake (grams)", 0, 500, 70, 1)
+
+
+# Build full encoded dict
+def encode_inputs():
+    races = ["Mexican American", "Other Hispanic", "Non-Hispanic White", "Non-Hispanic Black", "Non-Hispanic Asian", "Other Race"]
+    race_one_hot = {}
+    for r in races:
+        key = "RIDRETH3_" + r.replace(" ", "_")
+        race_one_hot[key] = 1 if race == r else 0
+    out = {
+        "RIAGENDR": 1 if gender == "Male" else 2,
+        "RIDAGEYR": age_years,
+        "INDFMPIR": float(family_income_ratio),
+        "Is_Smoker_Cat": 1 if smoking_status == "Yes" else 0,
+        "SLD012": 1 if sleep_disorder == "Yes" else 0,
+        "SLQ050": float(sleep_duration_hours),
+        "SLQ120": int(work_hours),
+        "PAQ620": int(physical_activity_mins),
+        "BMXBMI": float(bmi),
+        "ALQ111": int(alcohol_days_week),
+        "ALQ121": int(alcohol_drinks_per_day),
+        "ALQ142": int(alcohol_days_past_year),
+        "ALQ151": int(alcohol_max_any_day),
+        "ALQ170": float(alcohol_intake_freq),
+        "DR1TKCAL": int(total_calories),
+        "DR1TPROT": int(total_protein),
+        "DR1TCARB": int(total_carbs),
+        "DR1TSUGR": int(total_sugar),
+        "DR1TFIBE": int(total_fiber),
+        "DR1TTFAT": int(total_fat)
+    }
+    out.update(race_one_hot)
+    return out
+
+# --- Prediction Logic and Display ---
+st.header("Prediction Result")
+st.markdown("Adjust the inputs in the sidebar to see the prediction update in real-time.")
+
+if model is not None:
+    try:
+        full = encode_inputs()
+        X = pd.DataFrame([full], columns=MODEL_COLS)
+        
+        prediction = model.predict(X)[0]
+        probabilities = model.predict_proba(X)[0]
+        prediction_probability = probabilities[1] * 100 if len(probabilities) > 1 else 0
+
+        # Create a visual progress bar and color-coded label
+        col_pred, col_report = st.columns([3, 1])
+        with col_pred:
+            risk_label = "High Risk" if prediction_probability >= 70 else "Moderate Risk" if prediction_probability >= 30 else "Low Risk"
+            risk_color = "red" if prediction_probability >= 70 else "orange" if prediction_probability >= 30 else "green"
+            st.markdown(f"### Predicted NAFLD Risk: **<span style='color:{risk_color}'>{prediction_probability:.2f}% ({risk_label})</span>**", unsafe_allow_html=True)
+            st.progress(prediction_probability / 100)
+            st.markdown("The prediction is based on the features entered.")
+        
+        # Helper function for PDF report generation
+        def create_pdf(inputs, prediction_prob, risk_label):
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", size=12)
+            pdf.cell(200, 10, txt="NAFLD Risk Prediction Report", ln=1, align="C")
+            pdf.ln(10)
+            
+            pdf.set_font("Arial", size=10)
+            pdf.cell(200, 10, txt=f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=1)
+            pdf.cell(200, 10, txt="---", ln=1)
+            
+            pdf.set_font("Arial", style='B', size=10)
+            pdf.cell(200, 10, txt="Predicted Risk:", ln=1)
+            pdf.set_font("Arial", size=10)
+            pdf.cell(200, 10, txt=f"Risk: {prediction_prob:.2f}% ({risk_label})", ln=1)
+            pdf.cell(200, 10, txt="", ln=1)
+
+            pdf.set_font("Arial", style='B', size=10)
+            pdf.cell(200, 10, txt="Input Data:", ln=1)
+            pdf.set_font("Arial", size=10)
+            for key, value in inputs.items():
+                pdf.cell(200, 5, txt=f"{key}: {value}", ln=1)
+            
+            return pdf
+
+        with col_report:
+            pdf = create_pdf(full, prediction_probability, risk_label)
+            st.download_button(
+                "Download Report",
+                data=BytesIO(pdf.output(dest='S').encode("latin-1")),
+                file_name=f"NAFLD_Risk_Report_{datetime.now().strftime('%Y%m%d')}.pdf",
+                mime="application/pdf"
+            )
+
+        # Create an expandable section for advanced details
+        with st.expander("Show Advanced Analysis"):
+            # SHAP Analysis
+            st.subheader("Model Explainability (SHAP)")
+            st.markdown("The chart below shows how each feature contributed to the predicted risk. Red bars increase risk, while blue bars decrease it.")
+            
+            # Cache the SHAP explainer for performance
+            @st.cache_resource
+            def get_explainer(_model):
+                return shap.TreeExplainer(_model)
+            
+            explainer = get_explainer(model)
+            shap_values = explainer.shap_values(X)
+            # Create a Matplotlib figure for the SHAP plot
+            fig, ax = plt.subplots(figsize=(10, 6))
+            shap.summary_plot(shap_values[1], X, plot_type="bar", show=False, ax=ax)
+            st.pyplot(fig)
+            
+            st.markdown("---")
+            st.subheader("Input Data Summary")
+            st.dataframe(pd.DataFrame([full]).T)
+
+            # --- Saved Data Section ---
+            st.subheader("Raw Saved Data")
+            if st.button('Refresh Saved Predictions'):
+                if predictions_collection is not None:
+                    try:
+                        saved_predictions = list(predictions_collection.find())
+                        if saved_predictions:
+                            df_predictions = pd.DataFrame(saved_predictions)
+                            # Remove MongoDB's default _id column for display
+                            if '_id' in df_predictions.columns:
+                                df_predictions = df_predictions.drop(columns=['_id'])
+                            st.dataframe(df_predictions)
+                        else:
+                            st.info("No saved predictions found.")
+                    except Exception as e:
+                        st.error(f"Error retrieving predictions: {e}")
+                else:
+                    st.error("Cannot retrieve predictions. Not connected to MongoDB.")
+
+
+    except Exception as e:
+        st.error(f"An error occurred during prediction: {e}")
+        st.error("Please ensure that all 21 features have valid numerical inputs.")
+
+
+# === Julius patch: robust feature build and probability ===
+try:
+    # Assume you have a dict of current inputs named values_dict or raw_row; try both
+    _vals = values_dict if 'values_dict' in globals() else (raw_row if 'raw_row' in globals() else {})
+    X = _build_X_from_values(_vals)
+    prob = _predict_prob_safe(model, X)
+    render_risk_card(prob)
+except Exception as e:
+    import streamlit as st
+    st.info('Prediction patch error: ' + str(e))
+
+
+
+
+
+# === Julius sidebar: MongoDB connection status (read-only) ===
+try:
+    import streamlit as _st_sb
+    _st_sb.sidebar.markdown('## Connection')
+    # Try common variable names for client and db
+    _client = None
+    _dbobj = None
+    if 'client' in globals():
+        _client = client
+    if 'mongo_client' in globals() and _client is None:
+        _client = mongo_client
+    if 'db' in globals():
+        _dbobj = db
+    if _dbobj is None and _client is not None:
+        try:
+            # Try typical env db name variables
+            _db_name = None
+            for k in ['MONGO_DB','MONGODB_DB','MONGO_DB_NAME','DB_NAME']:
+                if k in os.environ:
+                    _db_name = os.environ[k]
+                    break
+            if _db_name is None:
+                try:
+                    _db_name = _client.list_database_names()[0]
+                except Exception:
+                    _db_name = 'database'
+            _dbobj = _client[_db_name]
+        except Exception:
+            _dbobj = None
+    if _dbobj is not None:
+        _st_sb.sidebar.success('MongoDB: connected')
+    else:
+        _st_sb.sidebar.warning('MongoDB: not connected')
+except Exception:
+    pass
+
+
+# ==== Julius patch: consistent prediction and card ====
+try:
+    _values_src = values_dict if 'values_dict' in globals() else (raw_row if 'raw_row' in globals() else {})
+    _Xp = _build_X(_values_src)
+    prob = _predict_prob_safe(model, _Xp)
+    render_risk_card(prob)
+except Exception as _e:
+    import streamlit as _stp
+    _stp.info('Prediction patch error: ' + str(_e))
+
+
+# ==== Julius patch: Sidebar MongoDB connection status ====
+try:
+    import streamlit as _st_sb
+    _st_sb.sidebar.markdown('## Connection')
+    _ok = False
+    if 'db' in globals() and db is not None:
+        _ok = True
+    elif 'mongo_db' in globals() and mongo_db is not None:
+        _ok = True
+    elif 'database' in globals() and database is not None:
+        _ok = True
+    if _ok:
+        _st_sb.sidebar.success('MongoDB: connected')
+    else:
+        _st_sb.sidebar.warning('MongoDB: not connected')
+except Exception:
+    pass
