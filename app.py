@@ -62,13 +62,6 @@ def load_model(path):
 
 # Sidebar: Model file
 with st.sidebar:
-    st.header("Model")
-    model_path = st.text_input("Model file path", value="rf_lifestyle_model (1).pkl")
-
-model = load_model(model_path)
-
-# MongoDB Connection Status in Sidebar
-with st.sidebar:
     st.header("MongoDB Connection Status")
     try:
         # Check if connected
@@ -79,6 +72,10 @@ with st.sidebar:
     except Exception as e:
         st.error(f"Error: {e}")
 
+    st.header("Model")
+    model_path = st.text_input("Model file path", value="rf_lifestyle_model (1).pkl")
+
+model = load_model(model_path)
 
 # --- Function to Encode Inputs ---
 EXPECTED_FEATURES = [
@@ -91,30 +88,30 @@ EXPECTED_FEATURES = [
 ]
 
 def encode_inputs():
-    gender = st.sidebar.selectbox("Gender", ["Male", "Female"], index=0)
-    age_years = st.sidebar.slider("Age in years", 0, 120, 40, 1)
-    race = st.sidebar.selectbox("Race/Ethnicity", [
+    gender = st.selectbox("Gender", ["Male", "Female"], index=0)
+    age_years = st.slider("Age in years", 0, 120, 40, 1)
+    race = st.selectbox("Race/Ethnicity", [
         "Mexican American", "Other Hispanic", "Non-Hispanic White",
         "Non-Hispanic Black", "Non-Hispanic Asian", "Other Race"
     ], index=0)
-    family_income_ratio = st.sidebar.slider("Family income ratio", 0.0, 10.0, 2.0, 0.1)
-    smoking_status = st.sidebar.selectbox("Smoking status", ["No", "Yes"], index=0)
-    sleep_disorder = st.sidebar.selectbox("Sleep Disorder Status", ["No", "Yes"], index=0)
-    sleep_duration_hours = st.sidebar.slider("Sleep duration (hours/day)", 0.0, 24.0, 8.0, 0.25)
-    work_hours = st.sidebar.slider("Work schedule duration (hours)", 0, 24, 8, 1)
-    physical_activity_mins = st.sidebar.slider("Physical activity (minutes/day)", 0, 1440, 30, 5)
-    bmi = st.sidebar.slider("BMI", 10.0, 60.0, 25.0, 0.1)
-    alcohol_days_week = st.sidebar.slider("Alcohol consumption (days/week)", 0, 7, 0, 1)
-    alcohol_drinks_per_day = st.sidebar.slider("Alcohol drinks per day", 0, 50, 0, 1)
-    alcohol_days_past_year = st.sidebar.slider("Number of days drank in the past year", 0, 366, 0, 1)
-    alcohol_max_any_day = st.sidebar.slider("Max number of drinks on any single day", 0, 50, 0, 1)
-    alcohol_intake_freq = st.sidebar.slider("Alcohol intake frequency (drinks/day)", 0.0, 50.0, 0.0, 0.1)
-    total_calories = st.sidebar.slider("Total calorie intake (kcal)", 0, 10000, 2000, 50)
-    total_protein = st.sidebar.slider("Total protein intake (grams)", 0, 500, 60, 5)
-    total_carbs = st.sidebar.slider("Total carbohydrate intake (grams)", 0, 1000, 250, 5)
-    total_sugar = st.sidebar.slider("Total sugar intake (grams)", 0, 1000, 40, 5)
-    total_fiber = st.sidebar.slider("Total fiber intake (grams)", 0, 500, 30, 1)
-    total_fat = st.sidebar.slider("Total fat intake (grams)", 0, 500, 70, 1)
+    family_income_ratio = st.slider("Family income ratio", 0.0, 10.0, 2.0, 0.1)
+    smoking_status = st.selectbox("Smoking status", ["No", "Yes"], index=0)
+    sleep_disorder = st.selectbox("Sleep Disorder Status", ["No", "Yes"], index=0)
+    sleep_duration_hours = st.slider("Sleep duration (hours/day)", 0.0, 24.0, 8.0, 0.25)
+    work_hours = st.slider("Work schedule duration (hours)", 0, 24, 8, 1)
+    physical_activity_mins = st.slider("Physical activity (minutes/day)", 0, 1440, 30, 5)
+    bmi = st.slider("BMI", 10.0, 60.0, 25.0, 0.1)
+    alcohol_days_week = st.slider("Alcohol consumption (days/week)", 0, 7, 0, 1)
+    alcohol_drinks_per_day = st.slider("Alcohol drinks per day", 0, 50, 0, 1)
+    alcohol_days_past_year = st.slider("Number of days drank in the past year", 0, 366, 0, 1)
+    alcohol_max_any_day = st.slider("Max number of drinks on any single day", 0, 50, 0, 1)
+    alcohol_intake_freq = st.slider("Alcohol intake frequency (drinks/day)", 0.0, 50.0, 0.0, 0.1)
+    total_calories = st.slider("Total calorie intake (kcal)", 0, 10000, 2000, 50)
+    total_protein = st.slider("Total protein intake (grams)", 0, 500, 60, 5)
+    total_carbs = st.slider("Total carbohydrate intake (grams)", 0, 1000, 250, 5)
+    total_sugar = st.slider("Total sugar intake (grams)", 0, 1000, 40, 5)
+    total_fiber = st.slider("Total fiber intake (grams)", 0, 500, 30, 1)
+    total_fat = st.slider("Total fat intake (grams)", 0, 500, 70, 1)
 
     # One-hot encode race categories
     race_one_hot = {}
@@ -154,7 +151,7 @@ if model is not None:
     try:
         # Get updated user inputs and encode them for prediction
         full = encode_inputs()
-        X = pd.DataFrame([full], columns=model.feature_names_in_)
+        X = pd.DataFrame([full], columns=EXPECTED_FEATURES)
 
         # Predict class probabilities
         prediction = model.predict(X)[0]
