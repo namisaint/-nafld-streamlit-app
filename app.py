@@ -14,45 +14,84 @@ from fpdf import FPDF
 from io import BytesIO
 
 
-# ==== Patches: prediction stability, SHAP, Mongo status ====
-import types as _types_patch
-import numpy as _np_patch
-import pandas as _pd_patch
-import streamlit as _st_patch
+# === Julius minimal helpers (no secrets/mongo changes) ===
+import pandas as _pd
+import numpy as _np
+import streamlit as _st
 
-# Visible Mongo badge
-def _mongo_badge(client, db_name):
-    try:
-        if client is None:
-            _st_patch.warning('MongoDB: not connected')
-            return None
-        db = client[db_name]
-        _st_patch.success('MongoDB: connected to ' + db_name)
-        return db
-    except Exception as e:
-        _st_patch.info('MongoDB connection issue: ' + str(e))
-        return None
+EXPECTED_FEATURES = [
+    'Gender','Age in years','Race/Ethnicity','Family income ratio','Smoking status','Sleep Disorder Status',
+    'Sleep duration (hours/day)','Work schedule duration (hours)','Physical activity (minutes/day)','BMI',
+    'Alcohol consumption (days/week)','Alcohol drinks per day','Number of days drank in the past year',
+    'Max number of drinks on any single day','Alcohol intake frequency (drinks/day)','Total calorie intake (kcal)',
+    'Total protein intake (grams)','Total carbohydrate intake (grams)','Total sugar intake (grams)',
+    'Total fiber intake (grams)','Total fat intake (grams)'
+]
 
-# Ensure proba
-def _predict_probability(model_obj, X_df):
+def _build_X_from_values(values_dict):
+    # Cast to numeric where possible; if categorical strings expected, leave as-is to let pipeline handle
+    row = {}
+    for k in EXPECTED_FEATURES:
+        v = values_dict.get(k, None)
+        row[k] = v
+    X = _pd.DataFrame([row], columns = EXPECTED_FEATURES)
+    # Coerce numerics where appropriate but ignore errors (pipeline may handle)
+    numeric_like = [
+        'Age in years','Family income ratio','Sleep duration (hours/day)','Work schedule duration (hours)',
+        'Physical activity (minutes/day)','BMI','Alcohol consumption (days/week)','Alcohol drinks per day',
+        'Number of days drank in the past year','Max number of drinks on any single day',
+        'Alcohol intake frequency (drinks/day)','Total calorie intake (kcal)','Total protein intake (grams)',
+        'Total carbohydrate intake (grams)','Total sugar intake (grams)','Total fiber intake (grams)','Total fat intake (grams)'
+    ]
+    for c in numeric_like:
+        if c in X.columns:
+            X[c] = _pd.to_numeric(X[c], errors = 'coerce')
+    return X
+
+def _positive_index(model_obj):
     try:
-        return float(model_obj.predict_proba(X_df)[:, 1][0])
-    except Exception:
+        classes = list(model_obj.classes_)
+        if 1 in classes:
+            return classes.index(1)
+        if '1' in classes:
+            return classes.index('1')
+        if True in classes:
+            return classes.index(True)
+        # default to the larger label as positive if numeric
         try:
-            # Some pipelines expose named_steps with calibrated classifier inside
-            return float(model_obj.named_steps['classifier'].predict_proba(X_df)[:, 1][0])
+            nums = [float(x) for x in classes]
+            return nums.index(max(nums))
         except Exception:
-            try:
-                # Decision function fallback; min-max scale for display only
-                val = float(model_obj.decision_function(X_df)[0])
-                # simple normalization
-                val_c = max(min((val + 5.0) / 10.0, 1.0), 0.0)
-                return float(val_c)
-            except Exception:
-                # Last resort: predict -> {0,1}
-                return float(_np_patch.clip(float(model_obj.predict(X_df)[0]), 0.0, 1.0))
+            return 1 if len(classes) > 1 else 0
+    except Exception:
+        return 1
 
-# Risk card (clear)
+def _predict_prob_safe(model_obj, X_df):
+    # Prefer predict_proba
+    try:
+        pos = _positive_index(model_obj)
+        return float(model_obj.predict_proba(X_df)[0][pos])
+    except Exception:
+        # Try pipelines exposing inner classifier
+        try:
+            clf = model_obj.named_steps.get('classifier', None)
+            if clf is not None and hasattr(clf, 'predict_proba'):
+                pos = _positive_index(clf)
+                return float(clf.predict_proba(X_df)[0][pos])
+        except Exception:
+            pass
+        # Decision function fallback
+        try:
+            val = float(model_obj.decision_function(X_df)[0])
+            val_c = max(min((val + 5.0) / 10.0, 1.0), 0.0)
+            return float(val_c)
+        except Exception:
+            # Binary predict fallback
+            try:
+                return float(_np.clip(float(model_obj.predict(X_df)[0]), 0.0, 1.0))
+            except Exception:
+                return 0.5
+
 def render_risk_card(prob):
     try:
         p = float(prob)
@@ -75,46 +114,7 @@ def render_risk_card(prob):
         '</div>' +
         '</div>'
     )
-    _st_patch.markdown(html, unsafe_allow_html = True)
-
-# SHAP section
-def _shap_section(model_obj, X_df):
-    import shap
-    try:
-        bg = _pd_patch.concat([X_df] * 30, ignore_index = True)
-        for c in bg.columns:
-            try:
-                bg[c] = bg[c] + _np_patch.random.normal(0, 1e-6, size = len(bg))
-            except Exception:
-                pass
-        try:
-            explainer = shap.Explainer(model_obj, bg)
-        except Exception:
-            try:
-                explainer = shap.Explainer(model_obj.predict_proba, bg)
-            except Exception:
-                explainer = None
-        if explainer is None:
-            _st_patch.info('SHAP not available for this model setup.')
-            return
-        sv = explainer(X_df)
-        try:
-            shap.plots.bar(sv, max_display = 10, show = False)
-            import matplotlib.pyplot as plt
-            plt.tight_layout()
-            plt.show()
-        except Exception:
-            _st_patch.info('SHAP computed but plotting failed.')
-    except Exception as e:
-        _st_patch.info('SHAP error: ' + str(e))
-
-# Hook: try to locate where X is prepared and prediction occurs. We will insert a clear block that:
-# - derives feature order from model if pipeline has feature_names_in_
-# - otherwise uses current X columns order
-# - computes prob with _predict_probability
-# - prints a tiny debug preview and renders risk card
-
-# We will match common call sites using regex for predict or predict_proba and insert our block before it.
+    _st.markdown(html, unsafe_allow_html = True)
 
 
 # --- App Configuration ---
@@ -386,21 +386,53 @@ if model is not None:
         st.error("Please ensure that all 21 features have valid numerical inputs.")
 
 
-# === Julius patch: compute prob robustly and show card ===
+# === Julius patch: robust feature build and probability ===
 try:
-    _model_obj = model
-except Exception:
-    _model_obj = model if 'model' in globals() else None
+    # Assume you have a dict of current inputs named values_dict or raw_row; try both
+    _vals = values_dict if 'values_dict' in globals() else (raw_row if 'raw_row' in globals() else {})
+    X = _build_X_from_values(_vals)
+    prob = _predict_prob_safe(model, X)
+    render_risk_card(prob)
+except Exception as e:
+    import streamlit as st
+    st.info('Prediction patch error: ' + str(e))
+
+
+
+
+
+# === Julius sidebar: MongoDB connection status (read-only) ===
 try:
-    _X_df = X
+    import streamlit as _st_sb
+    _st_sb.sidebar.markdown('## Connection')
+    # Try common variable names for client and db
+    _client = None
+    _dbobj = None
+    if 'client' in globals():
+        _client = client
+    if 'mongo_client' in globals() and _client is None:
+        _client = mongo_client
+    if 'db' in globals():
+        _dbobj = db
+    if _dbobj is None and _client is not None:
+        try:
+            # Try typical env db name variables
+            _db_name = None
+            for k in ['MONGO_DB','MONGODB_DB','MONGO_DB_NAME','DB_NAME']:
+                if k in os.environ:
+                    _db_name = os.environ[k]
+                    break
+            if _db_name is None:
+                try:
+                    _db_name = _client.list_database_names()[0]
+                except Exception:
+                    _db_name = 'database'
+            _dbobj = _client[_db_name]
+        except Exception:
+            _dbobj = None
+    if _dbobj is not None:
+        _st_sb.sidebar.success('MongoDB: connected')
+    else:
+        _st_sb.sidebar.warning('MongoDB: not connected')
 except Exception:
-    _X_df = X if 'X' in globals() else None
-
-if _model_obj is not None and _X_df is not None:
-    try:
-        prob = _predict_probability(_model_obj, _X_df)
-        render_risk_card(prob)
-    except Exception as e:
-        import streamlit as st
-        st.info('Probability patch failed: ' + str(e))
-
+    pass
