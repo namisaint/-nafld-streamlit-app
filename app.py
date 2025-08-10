@@ -1,4 +1,4 @@
-import pandas as pd
+mport pandas as pd
 import joblib
 import streamlit as st
 from datetime import datetime
@@ -16,6 +16,37 @@ def load_model(path):
     except Exception as e:
         st.error("Error loading model: " + str(e))
         return None
+
+
+# --- Risk UI Helpers (added) ---
+def _risk_label(prob):
+    if prob is None:
+        return "Unknown", "#9e9e9e"
+    if prob < 0.40:
+        return "Low", "#2e7d32"
+    if prob < 0.60:
+        return "Borderline", "#f9a825"
+    return "High", "#c62828"
+
+
+def show_risk(prob):
+    import matplotlib.pyplot as plt
+    import numpy as np
+    label, color = _risk_label(prob)
+    pct = int(round(prob * 100)) if prob is not None else 0
+    st.subheader("Prediction")
+    st.write("Risk category: " + label)
+    st.write("Estimated probability: " + str(pct) + "%")
+    # Horizontal progress bar via matplotlib for consistent color control
+    fig, ax = plt.subplots(figsize=(6, 0.5))
+    ax.barh([0], [pct], color=color)
+    ax.set_xlim(0, 100)
+    ax.set_yticks([])
+    ax.set_xlabel('Risk %')
+    ax.set_title('Risk Progress')
+    plt.tight_layout()
+    plt.show()
+    st.caption("This is the model’s estimated chance of NAFLD given the inputs. It is not a diagnosis.")
 
 # Sidebar: Mongo
 with st.sidebar:
@@ -196,10 +227,39 @@ if submitted:
                 if y_proba < 0.33:
                     st.info("Result suggests a low likelihood. Consider maintaining current lifestyle habits and regular checkups.")
                 elif y_proba < 0.66:
-                    st.warning("Result suggests a borderline likelihood. Consider discussing lifestyle changes and screening with a clinician.")
+                    st.warning("")
                 else:
                     st.error("Result suggests a higher likelihood. Consider clinical evaluation and targeted lifestyle changes.")
 
             save_to_mongo(row, str(y_pred), y_proba)
         except Exception as e:
             st.error("Prediction failed: " + str(e))
+
+
+# --- Risk UI (added) ---
+try:
+    prob_est = None
+    # Try common variable names
+    for name in ['y_proba', 'proba', 'prob', 'probability']:
+        if name in locals() and locals()[name] is not None:
+            prob_est = float(locals()[name]) if not isinstance(locals()[name], (list, tuple)) else float(locals()[name][0])
+            break
+    # If model and single-row input dataframe exist, try to compute
+    if prob_est is None:
+        if 'model' in locals() and hasattr(model, 'predict_proba'):
+            # find a dataframe variable with exactly one row
+            cand_df = None
+            for k, v in list(locals().items()):
+                try:
+                    import pandas as pd
+                    if isinstance(v, pd.DataFrame) and len(v) == 1:
+                        cand_df = v
+                        break
+                except Exception:
+                    pass
+            if cand_df is not None:
+                prob_est = float(model.predict_proba(cand_df)[0][1])
+    if prob_est is not None:
+        show_risk(prob_est)
+except Exception as _e:
+    st.info("Could not render risk progress: " + str(_e))
