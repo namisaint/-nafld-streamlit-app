@@ -9,7 +9,7 @@ import certifi
 from io import BytesIO
 from fpdf import FPDF
 
-# Set up page
+# --- Page Setup ---
 st.set_page_config(page_title="Dissertation Model Predictor", page_icon="🤖", layout="wide")
 
 import matplotlib.pyplot as plt
@@ -24,7 +24,7 @@ try:
     predictions_collection = db[COLLECTION_NAME]
 except:
     predictions_collection = None
-    st.warning("MongoDB connection not configured. Predictions will not be saved or loaded.")
+    st.warning("MongoDB connection not configured.")
 
 # --- Load model ---
 @st.cache_resource
@@ -49,9 +49,9 @@ except Exception:
         'DR1TPROT','DR1TCARB','DR1TSUGR','DR1TFIBE','DR1TTFAT','PAQ620','BMXBMI'
     ]
 
-# ----- Helper functions -----
-def _build_X_from_values():
-    # Get current input values from session state
+# --- Helper function for encoding inputs ---
+def encode_inputs():
+    # Fetch inputs from session_state, or default
     gender = st.session_state.get('gender', 'Male')
     age = st.session_state.get('age', 40)
     race = st.session_state.get('race', "Mexican American")
@@ -81,6 +81,7 @@ def _build_X_from_values():
         key = "RIDRETH3_" + r.replace(" ", "_")
         race_one_hot[key] = 1 if race == r else 0
 
+    # Build feature dict
     out = {
         "RIAGENDR": 1 if gender == "Male" else 2,
         "RIDAGEYR": age,
@@ -88,6 +89,4 @@ def _build_X_from_values():
         "Is_Smoker_Cat": 1 if smoking_status == "Yes" else 0,
         "SLD012": 1 if sleep_disorder == "Yes" else 0,
         "SLQ050": float(sleep_hours),
-        "SLQ120": int(work_hours),
-        "PAQ620": int(physical_activity),
-        "BMXBMI": float(bmi),
+        "SLQ120": int(work_hours
