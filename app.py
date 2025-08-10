@@ -291,17 +291,32 @@ if model is not None:
         full = encode_inputs()
         X = pd.DataFrame([full], columns=MODEL_COLS)
         
+        # Predict class probabilities
         prediction = model.predict(X)[0]
         probabilities = model.predict_proba(X)[0]
-        prediction_probability = probabilities[1] * 100 if len(probabilities) > 1 else 0
 
-        # Create a visual progress bar and color-coded label
+        # Safe handling if there are fewer classes (binary classification)
+        if len(probabilities) > 1:
+            prediction_probability = probabilities[1] * 100  # Probability for class 1 (positive class)
+        else:
+            prediction_probability = probabilities[0] * 100  # Only one class, use the single probability
+
+        # Define Risk Level
+        if prediction_probability < 33:
+            risk_label = "Low"
+            risk_color = "green"
+        elif prediction_probability < 67:
+            risk_label = "Medium"
+            risk_color = "orange"
+        else:
+            risk_label = "High"
+            risk_color = "red"
+
+        # Displaying the result
         col_pred, col_report = st.columns([3, 1])
         with col_pred:
-            risk_label = "High Risk" if prediction_probability >= 70 else "Moderate Risk" if prediction_probability >= 30 else "Low Risk"
-            risk_color = "red" if prediction_probability >= 70 else "orange" if prediction_probability >= 30 else "green"
             st.markdown(f"### Predicted NAFLD Risk: **<span style='color:{risk_color}'>{prediction_probability:.2f}% ({risk_label})</span>**", unsafe_allow_html=True)
-            st.progress(prediction_probability / 100)
+            st.progress(prediction_probability / 100)  # Progress bar showing the risk percentage
             st.markdown("The prediction is based on the features entered.")
         
         # Helper function for PDF report generation
@@ -339,100 +354,6 @@ if model is not None:
                 mime="application/pdf"
             )
 
-        # Create an expandable section for advanced details
-        with st.expander("Show Advanced Analysis"):
-            # SHAP Analysis
-            st.subheader("Model Explainability (SHAP)")
-            st.markdown("The chart below shows how each feature contributed to the predicted risk. Red bars increase risk, while blue bars decrease it.")
-            
-            # Cache the SHAP explainer for performance
-            @st.cache_resource
-            def get_explainer(_model):
-                return shap.TreeExplainer(_model)
-            
-            explainer = get_explainer(model)
-            shap_values = explainer.shap_values(X)
-            # Create a Matplotlib figure for the SHAP plot
-            fig, ax = plt.subplots(figsize=(10, 6))
-            shap.summary_plot(shap_values[1], X, plot_type="bar", show=False, ax=ax)
-            st.pyplot(fig)
-            
-            st.markdown("---")
-            st.subheader("Input Data Summary")
-            st.dataframe(pd.DataFrame([full]).T)
-
-            # --- Saved Data Section ---
-            st.subheader("Raw Saved Data")
-            if st.button('Refresh Saved Predictions'):
-                if predictions_collection is not None:
-                    try:
-                        saved_predictions = list(predictions_collection.find())
-                        if saved_predictions:
-                            df_predictions = pd.DataFrame(saved_predictions)
-                            # Remove MongoDB's default _id column for display
-                            if '_id' in df_predictions.columns:
-                                df_predictions = df_predictions.drop(columns=['_id'])
-                            st.dataframe(df_predictions)
-                        else:
-                            st.info("No saved predictions found.")
-                    except Exception as e:
-                        st.error(f"Error retrieving predictions: {e}")
-                else:
-                    st.error("Cannot retrieve predictions. Not connected to MongoDB.")
-
-
     except Exception as e:
         st.error(f"An error occurred during prediction: {e}")
         st.error("Please ensure that all 21 features have valid numerical inputs.")
-
-
-# === Julius patch: robust feature build and probability ===
-try:
-    # Assume you have a dict of current inputs named values_dict or raw_row; try both
-    _vals = values_dict if 'values_dict' in globals() else (raw_row if 'raw_row' in globals() else {})
-    X = _build_X_from_values(_vals)
-    prob = _predict_prob_safe(model, X)
-    render_risk_card(prob)
-except Exception as e:
-    import streamlit as st
-    st.info('Prediction patch error: ' + str(e))
-
-
-
-
-
-# === Julius sidebar: MongoDB connection status (read-only) ===
-try:
-    import streamlit as _st_sb
-    _st_sb.sidebar.markdown('## Connection')
-    # Try common variable names for client and db
-    _client = None
-    _dbobj = None
-    if 'client' in globals():
-        _client = client
-    if 'mongo_client' in globals() and _client is None:
-        _client = mongo_client
-    if 'db' in globals():
-        _dbobj = db
-    if _dbobj is None and _client is not None:
-        try:
-            # Try typical env db name variables
-            _db_name = None
-            for k in ['MONGO_DB','MONGODB_DB','MONGO_DB_NAME','DB_NAME']:
-                if k in os.environ:
-                    _db_name = os.environ[k]
-                    break
-            if _db_name is None:
-                try:
-                    _db_name = _client.list_database_names()[0]
-                except Exception:
-                    _db_name = 'database'
-            _dbobj = _client[_db_name]
-        except Exception:
-            _dbobj = None
-    if _dbobj is not None:
-        _st_sb.sidebar.success('MongoDB: connected')
-    else:
-        _st_sb.sidebar.warning('MongoDB: not connected')
-except Exception:
-    pass
