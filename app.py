@@ -244,7 +244,10 @@ if model is not None:
             
             explainer = get_explainer(model)
             shap_values = explainer.shap_values(X)
-            st.pyplot(shap.summary_plot(shap_values, X, plot_type="bar", show=False))
+            # Create a Matplotlib figure for the SHAP plot
+            fig, ax = plt.subplots(figsize=(10, 6))
+            shap.summary_plot(shap_values, X, plot_type="bar", show=False, ax=ax)
+            st.pyplot(fig)
             
             st.markdown("---")
             st.subheader("Input Data Summary")
