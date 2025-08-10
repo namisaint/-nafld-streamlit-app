@@ -82,7 +82,7 @@ def _build_X(values_dict):
             X[c] = pd.to_numeric(X[c], errors = 'coerce')
     return X
 
-def render_risk_card(prob):
+def :
     try:
         p = float(prob)
     except Exception:
@@ -375,9 +375,27 @@ try:
     if 'model' in globals():
         prob = _predict_prob_safe(model, X_dyn)
     else:
-        prob = 0.5
     st.write('Predicted NAFLD Risk: ' + str(round(prob * 100.0, 2)) + '%')
     render_risk_card(prob)
 except Exception as e:
     st.error('Prediction error: ' + str(e))
 
+
+
+
+# === Julius single dynamic prediction override ===
+try:
+    if 'values_dict' not in globals() or not isinstance(values_dict, dict):
+        try:
+            values_dict = dict(st.session_state)
+        except Exception:
+            values_dict = {}
+    X_dyn = _build_X(values_dict)
+    if 'model' in globals():
+        prob = _predict_prob_safe(model, X_dyn)
+    else:
+        prob = prob if 'prob' in globals() else 0.5
+    st.write('Predicted NAFLD Risk: ' + str(round(prob * 100.0, 2)) + '%')
+    render_risk_card(prob)
+except Exception as e:
+    st.error('Prediction error: ' + str(e))
