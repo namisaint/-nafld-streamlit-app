@@ -50,7 +50,7 @@ except:
 
 # Helper function: encode all current inputs into feature dict
 def encode_inputs():
-    # Retrieve current inputs from session_state or defaults
+    # Fetch current input values from session_state or default values
     gender = st.session_state.get('gender', 'Male')
     age = st.session_state.get('age', 40)
     race = st.session_state.get('race', "Mexican American")
@@ -80,7 +80,7 @@ def encode_inputs():
         key = "RIDRETH3_" + r.replace(" ", "_")
         race_one_hot[key] = 1 if race == r else 0
 
-    # Build feature dictionary
+    # Full feature dictionary
     out = {
         "RIAGENDR": 1 if gender == "Male" else 2,
         "RIDAGEYR": age,
@@ -88,4 +88,25 @@ def encode_inputs():
         "Is_Smoker_Cat": 1 if smoking_status == "Yes" else 0,
         "SLD012": 1 if sleep_disorder == "Yes" else 0,
         "SLQ050": float(sleep_hours),
-        "SLQ120": int(work_hours
+        "SLQ120": int(work_hours),  # <-- Corrected line (closed parenthesis)
+        "PAQ620": int(physical_activity),
+        "BMXBMI": float(bmi),
+        "ALQ111": int(alcohol_days),
+        "ALQ121": int(drinks_per_day),
+        "ALQ142": int(days_past_year),
+        "ALQ151": int(max_drinks),
+        "ALQ170": float(alcohol_freq),
+        "DR1TKCAL": int(calories),
+        "DR1TPROT": int(protein),
+        "DR1TCARB": int(carbs),
+        "DR1TSUGR": int(sugar),
+        "DR1TFIBE": int(fiber),
+        "DR1TTFAT": int(fat),
+    }
+
+    # Add race hot variables
+    for r in races:
+        key = "RIDRETH3_" + r.replace(" ", "_")
+        out[key] = 1 if race == r else 0
+
+    return out
