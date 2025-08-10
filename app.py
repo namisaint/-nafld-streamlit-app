@@ -16,7 +16,7 @@ from io import BytesIO
 # --- App Configuration ---
 st.set_page_config(
     page_title="Dissertation Model Predictor",
-    page_icon="�",
+    page_icon="🤖",
     layout="wide"
 )
 
@@ -87,6 +87,7 @@ def save_to_mongo(payload, pred, proba):
         st.error("Save failed: " + str(e))
 
 # --- UI
+st.title("🤖 NAFLD Lifestyle Risk Predictor")
 st.subheader("User Data Input")
 st.markdown("Enter values for the model's 21 features to get a prediction.")
 
@@ -161,10 +162,11 @@ def encode_inputs():
 
 # --- Prediction Logic and Display ---
 st.header("Prediction Result")
+st.markdown("Adjust the inputs in the sidebar to see the prediction update in real-time.")
 
-# Place prediction logic inside a button to force re-execution
-if st.button("Get Prediction"):
-    if model is not None:
+if model is not None:
+    # Place prediction logic inside a button to force re-execution
+    if st.button("Get Prediction"):
         try:
             full = encode_inputs()
             X = pd.DataFrame([full], columns=MODEL_COLS)
@@ -234,7 +236,7 @@ if st.button("Get Prediction"):
                 shap_values = explainer.shap_values(X)
                 # Create a Matplotlib figure for the SHAP plot
                 fig, ax = plt.subplots(figsize=(10, 6))
-                shap.summary_plot(shap_values[1], X, plot_type="bar", show=False, ax=ax)
+                shap.summary_plot(shap_values, X, plot_type="bar", show=False)
                 st.pyplot(fig)
                 
                 st.markdown("---")
@@ -264,4 +266,3 @@ if st.button("Get Prediction"):
         except Exception as e:
             st.error(f"An error occurred during prediction: {e}")
             st.error("Please ensure that all 21 features have valid numerical inputs.")
-�
