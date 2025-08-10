@@ -9,9 +9,6 @@ from datetime import datetime
 
 st.set_page_config(page_title = "NAFLD Lifestyle Risk Predictor", layout = "wide")
 
-# -----------------------
-# Mongo connection (uses st.secrets)
-# -----------------------
 @st.cache_resource
 def get_mongo_client():
     try:
@@ -19,16 +16,12 @@ def get_mongo_client():
         import certifi
         uri = st.secrets["mongo"]["connection_string"]
         client = MongoClient(uri, tlsCAFile = certifi.where(), serverSelectionTimeoutMS = 20000, connectTimeoutMS = 20000)
-        # ping
         client.admin.command("ping")
         return client
     except Exception as e:
         st.warning("Mongo connection not available: " + str(e))
         return None
 
-# -----------------------
-# Model + SHAP
-# -----------------------
 @st.cache_resource
 def load_model_cached(path):
     return joblib.load(path)
@@ -38,14 +31,11 @@ def build_explainer_cached(model, background_df):
     try:
         return shap.Explainer(model.predict_proba, background_df)
     except Exception:
-        # fallback for tree models
         try:
             return shap.Explainer(model)
         except Exception as e:
             st.warning("Could not build SHAP explainer: " + str(e))
             return None
-
-# Risk card UI
 
 def render_risk_card(prob):
     try:
@@ -58,16 +48,16 @@ def render_risk_card(prob):
         label = "Medium"; color = "#f59e0b"
     else:
         label = "High"; color = "#ef4444"
-    st.markdown(
-        "<div style=padding:12px;border-radius:8px;background:" + color + "1A;border:1px solid " + color + ">" +
-        "<b>Risk:</b> " + label + " (" + str(int(round(p*100))) + "%)" +
-        "<div style=height:10px;background:#e5e7eb;border-radius:6px;margin-top:8px;>" +
-        "<div style=width:" + str(int(round(p*100))) + "%;height:10px;background:" + color + ";border-radius:6px;"></div>" +
-        "</div></div>", unsafe_allow_html = True)
+    html = (
+        "<div style="padding:12px;border-radius:8px;background:" + color + "1A;border:1px solid " + color + "">"
+        "<b>Risk:</b> " + label + " (" + str(int(round(p*100))) + "%)"
+        "<div style="height:10px;background:#e5e7eb;border-radius:6px;margin-top:8px;">"
+        "<div style="width:" + str(int(round(p*100))) + "%;height:10px;background:" + color + ";border-radius:6px;"></div>"
+        "</div>"
+        "</div>"
+    )
+    st.markdown(html, unsafe_allow_html = True)
 
-# -----------------------
-# Sidebar: connections and model
-# -----------------------
 st.title("NAFLD Lifestyle Risk Predictor")
 st.caption("Enter values for the model features to get a prediction. Uses Streamlit secrets for MongoDB.")
 
@@ -91,10 +81,6 @@ if load_btn:
     except Exception as e:
         st.error("Failed to load model: " + str(e))
 
-# -----------------------
-# Feature inputs (example schema - replace with your real features)
-# -----------------------
-# Update this list to match your training columns
 feature_names = ["age", "bmi", "alt", "ast", "hdl", "tg"]
 
 col1, col2, col3 = st.columns(3)
@@ -118,42 +104,29 @@ row = {
 }
 X = pd.DataFrame([row], columns = feature_names)
 
-# -----------------------
-# Predict
-# -----------------------
 prob = None
-if model is not None:
+if load_btn:
     try:
         if hasattr(model, "predict_proba"):
             prob = float(model.predict_proba(X)[0][1])
         else:
-            # fallback: decision_function or predict
             if hasattr(model, "decision_function"):
-                from sklearn.preprocessing import MinMaxScaler
                 val = float(model.decision_function(X)[0])
-                scaler = MinMaxScaler(feature_range = (0.0, 1.0))
-                prob = float(scaler.fit_transform(np.array([[val],[0.0],[1.0]])).flatten()[0])
+                prob = 1.0 / (1.0 + np.exp(-val))
             else:
                 pred = float(model.predict(X)[0])
                 prob = max(0.0, min(1.0, pred))
     except Exception as e:
         st.error("Prediction failed: " + str(e))
 
-# -----------------------
-# Display result
-# -----------------------
 if prob is not None:
     st.subheader("Prediction")
     render_risk_card(prob)
     st.write("Estimated probability: " + str(int(round(prob*100))) + "%")
 
-# -----------------------
-# SHAP explanation
-# -----------------------
-if prob is not None and model is not None:
+if prob is not None and load_btn:
     with st.expander("Why this risk? (SHAP)"):
         try:
-            # Build a small background from jittered copies of X
             bg = pd.concat([X for _ in range(20)], ignore_index = True)
             for c in bg.columns:
                 try:
@@ -163,7 +136,6 @@ if prob is not None and model is not None:
             explainer = build_explainer_cached(model, bg)
             if explainer is not None:
                 shap_values = explainer(X)
-                st.write("Top contributing features:")
                 try:
                     shap.plots.waterfall(shap_values[0], show = False)
                     plt.tight_layout()
@@ -181,10 +153,7 @@ if prob is not None and model is not None:
         except Exception as e:
             st.info("SHAP explanation unavailable: " + str(e))
 
-# -----------------------
-# What-if analysis
-# -----------------------
-if model is not None:
+if load_btn:
     st.subheader("What-if analysis")
     wcol1, wcol2, wcol3 = st.columns(3)
     with wcol1:
@@ -212,9 +181,6 @@ if model is not None:
     except Exception as e:
         st.info("What-if prediction not available: " + str(e))
 
-# -----------------------
-# Download HTML report
-# -----------------------
 if prob is not None:
     try:
         html = "<html><head><meta charset=utf-8><title>NAFLD Report</title></head><body>"
