@@ -1,12 +1,9 @@
 streamlit
 pandas
-numpy
-joblib
 scikit-learn
+joblib
 pymongo
+plotly
 certifi
-matplotlib
-seaborn
 shap
-streamlit-shap
-jinja2
+fpdf
