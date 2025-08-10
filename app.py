@@ -9,8 +9,9 @@ import certifi
 from io import BytesIO
 from fpdf import FPDF
 
-# --- App Configuration ---
+# Set up page
 st.set_page_config(page_title="Dissertation Model Predictor", page_icon="🤖", layout="wide")
+
 import matplotlib.pyplot as plt
 
 # --- MongoDB connection ---
@@ -23,7 +24,7 @@ try:
     predictions_collection = db[COLLECTION_NAME]
 except:
     predictions_collection = None
-    st.warning("MongoDB connection not configured.")
+    st.warning("MongoDB connection not configured. Predictions will not be saved or loaded.")
 
 # --- Load model ---
 @st.cache_resource
@@ -38,19 +39,19 @@ with st.sidebar:
     model_path = st.text_input("Model file path", value="rf_lifestyle_model (1).pkl")
 model = load_model(model_path)
 
-# --- Model feature names ---
+# --- Model features ---
 try:
     MODEL_COLS = list(model.feature_names_in_)
 except Exception:
     MODEL_COLS = [
-        'RIAGENDR', 'RIDAGEYR', 'RIDRETH3', 'INDFMPIR', 'ALQ111', 'ALQ121', 'ALQ142',
-        'ALQ151', 'ALQ170', 'Is_Smoker_Cat', 'SLQ050', 'SLQ120', 'SLD012', 'DR1TKCAL',
-        'DR1TPROT', 'DR1TCARB', 'DR1TSUGR', 'DR1TFIBE', 'DR1TTFAT', 'PAQ620', 'BMXBMI'
+        'RIAGENDR','RIDAGEYR','RIDRETH3','INDFMPIR','ALQ111','ALQ121','ALQ142',
+        'ALQ151','ALQ170','Is_Smoker_Cat','SLQ050','SLQ120','SLD012','DR1TKCAL',
+        'DR1TPROT','DR1TCARB','DR1TSUGR','DR1TFIBE','DR1TTFAT','PAQ620','BMXBMI'
     ]
 
-# Helper functions
-def encode_inputs():
-    # Get all input values
+# ----- Helper functions -----
+def _build_X_from_values():
+    # Get current input values from session state
     gender = st.session_state.get('gender', 'Male')
     age = st.session_state.get('age', 40)
     race = st.session_state.get('race', "Mexican American")
@@ -73,6 +74,7 @@ def encode_inputs():
     fiber = st.session_state.get('fiber', 30)
     fat = st.session_state.get('fat', 70)
 
+    # Encode race
     races = ["Mexican American", "Other Hispanic", "Non-Hispanic White", "Non-Hispanic Black", "Non-Hispanic Asian", "Other Race"]
     race_one_hot = {}
     for r in races:
@@ -86,4 +88,6 @@ def encode_inputs():
         "Is_Smoker_Cat": 1 if smoking_status == "Yes" else 0,
         "SLD012": 1 if sleep_disorder == "Yes" else 0,
         "SLQ050": float(sleep_hours),
-        "SLQ120": int(work
+        "SLQ120": int(work_hours),
+        "PAQ620": int(physical_activity),
+        "BMXBMI": float(bmi),
