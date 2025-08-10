@@ -37,19 +37,21 @@ except Exception as e:
     predictions_collection = None
 
 
-@st.cache_resource
 def load_model(path):
     try:
-        return joblib.load(path)
+        model = joblib.load(path)
+        return model
     except Exception as e:
         st.error("Error loading model: " + str(e))
         return None
+
 
 # Sidebar: Model file
 with st.sidebar:
     st.header("Model")
     model_path = st.text_input("Model file path", value="rf_lifestyle_model (1).pkl")
 
+# Load the model every time
 model = load_model(model_path)
 
 # Try to read expected columns from model
@@ -85,7 +87,8 @@ def save_to_mongo(payload, pred, proba):
     except Exception as e:
         st.error("Save failed: " + str(e))
 
-# --- UI
+
+# --- UI ---
 st.title("🤖 NAFLD Lifestyle Risk Predictor")
 st.subheader("User Data Input")
 st.markdown("Enter values for the model's 21 features to get a prediction.")
@@ -170,6 +173,7 @@ if model is not None:
             X = pd.DataFrame([full], columns=MODEL_COLS)
             
             prediction = model.predict(X)[0]
+            # This fix handles cases where predict_proba only returns one class
             probabilities = model.predict_proba(X)
             prediction_probability = probabilities[0][1] * 100 if probabilities.shape[1] > 1 else 0
 
