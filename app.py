@@ -37,8 +37,6 @@ def get_mongo_client():
     Connects to the MongoDB Atlas cluster.
     """
     try:
-        # This fix uses the certifi library to resolve SSL handshake issues.
-        # It ensures a secure connection is made successfully from Streamlit's servers.
         client = MongoClient(MONGODB_CONNECTION_STRING, server_api=ServerApi('1'), tls=True, tlsCAFile=certifi.where())
         client.admin.command('ping')
         return client
