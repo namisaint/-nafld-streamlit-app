@@ -82,7 +82,7 @@ def _build_X(values_dict):
             X[c] = pd.to_numeric(X[c], errors = 'coerce')
     return X
 
-def :
+def render_risk_card(prob):
     try:
         p = float(prob)
     except Exception:
