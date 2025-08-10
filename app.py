@@ -2,101 +2,88 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-import os
 from datetime import datetime
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
-import plotly.express as px
 import certifi
-import shap
-import matplotlib.pyplot as plt
-from fpdf import FPDF
 from io import BytesIO
+from fpdf import FPDF
 
-# === Julius minimal helpers (no secrets/mongo changes) ===
-import pandas as _pd
-import numpy as _np
-import streamlit as _st
+# --- App Configuration ---
+st.set_page_config(page_title="Dissertation Model Predictor", page_icon="🤖", layout="wide")
+import matplotlib.pyplot as plt
 
-EXPECTED_FEATURES = [
-    'Gender','Age in years','Race/Ethnicity','Family income ratio','Smoking status','Sleep Disorder Status',
-    'Sleep duration (hours/day)','Work schedule duration (hours)','Physical activity (minutes/day)','BMI',
-    'Alcohol consumption (days/week)','Alcohol drinks per day','Number of days drank in the past year',
-    'Max number of drinks on any single single day','Alcohol intake frequency (drinks/day)',
-    'Total calorie intake (kcal)','Total protein intake (grams)','Total carbohydrate intake (grams)',
-    'Total sugar intake (grams)','Total fiber intake (grams)','Total fat intake (grams)'
-]
+# --- MongoDB connection ---
+try:
+    MONGODB_CONNECTION_STRING = st.secrets["mongo"]["connection_string"]
+    DB_NAME = st.secrets["mongo"]["db_name"]
+    COLLECTION_NAME = st.secrets["mongo"]["collection_name"]
+    client = MongoClient(MONGODB_CONNECTION_STRING, server_api=ServerApi('1'), tls=True, tlsCAFile=certifi.where())
+    db = client[DB_NAME]
+    predictions_collection = db[COLLECTION_NAME]
+except:
+    predictions_collection = None
+    st.warning("MongoDB connection not configured.")
 
-def _build_X_from_values(values_dict):
-    row = {}
-    for k in EXPECTED_FEATURES:
-        v = values_dict.get(k, None)
-        row[k] = v
-    X = _pd.DataFrame([row], columns=EXPECTED_FEATURES)
-    numeric_like = [
-        'Age in years','Family income ratio','Sleep duration (hours/day)','Work schedule duration (hours)',
-        'Physical activity (minutes/day)','BMI','Alcohol consumption (days/week)','Alcohol drinks per day',
-        'Number of days drank in the past year','Max number of drinks on any single single day',
-        'Alcohol intake frequency (drinks/day)','Total calorie intake (kcal)','Total protein intake (grams)',
-        'Total carbohydrate intake (grams)','Total sugar intake (grams)','Total fiber intake (grams)','Total fat intake (grams)'
+# --- Load model ---
+@st.cache_resource
+def load_model(path):
+    try:
+        return joblib.load(path)
+    except:
+        return None
+
+with st.sidebar:
+    st.header("Model")
+    model_path = st.text_input("Model file path", value="rf_lifestyle_model (1).pkl")
+model = load_model(model_path)
+
+# --- Model feature names ---
+try:
+    MODEL_COLS = list(model.feature_names_in_)
+except Exception:
+    MODEL_COLS = [
+        'RIAGENDR', 'RIDAGEYR', 'RIDRETH3', 'INDFMPIR', 'ALQ111', 'ALQ121', 'ALQ142',
+        'ALQ151', 'ALQ170', 'Is_Smoker_Cat', 'SLQ050', 'SLQ120', 'SLD012', 'DR1TKCAL',
+        'DR1TPROT', 'DR1TCARB', 'DR1TSUGR', 'DR1TFIBE', 'DR1TTFAT', 'PAQ620', 'BMXBMI'
     ]
-    for c in numeric_like:
-        if c in X.columns:
-            X[c] = _pd.to_numeric(X[c], errors='coerce')
-    return X
 
-def _positive_index(model_obj):
-    try:
-        classes = list(model_obj.classes_)
-        if 1 in classes:
-            return classes.index(1)
-        if '1' in classes:
-            return classes.index('1')
-        if True in classes:
-            return classes.index(True)
-        try:
-            nums = [float(x) for x in classes]
-            return nums.index(max(nums))
-        except Exception:
-            return 1 if len(classes) > 1 else 0
-    except Exception:
-        return 1
+# Helper functions
+def encode_inputs():
+    # Get all input values
+    gender = st.session_state.get('gender', 'Male')
+    age = st.session_state.get('age', 40)
+    race = st.session_state.get('race', "Mexican American")
+    family_income_ratio = st.session_state.get('family_income_ratio', 2.0)
+    smoking_status = st.session_state.get('smoking_status', 'No')
+    sleep_disorder = st.session_state.get('sleep_disorder', 'No')
+    sleep_hours = st.session_state.get('sleep_hours', 8.0)
+    work_hours = st.session_state.get('work_hours', 8)
+    physical_activity = st.session_state.get('physical_activity', 30)
+    bmi = st.session_state.get('bmi', 25.0)
+    alcohol_days = st.session_state.get('alcohol_days', 0)
+    drinks_per_day = st.session_state.get('drinks_per_day', 0)
+    days_past_year = st.session_state.get('days_past_year', 0)
+    max_drinks = st.session_state.get('max_drinks', 0)
+    alcohol_freq = st.session_state.get('alcohol_freq', 0.0)
+    calories = st.session_state.get('calories', 2000)
+    protein = st.session_state.get('protein', 60)
+    carbs = st.session_state.get('carbs', 250)
+    sugar = st.session_state.get('sugar', 40)
+    fiber = st.session_state.get('fiber', 30)
+    fat = st.session_state.get('fat', 70)
 
-def _predict_prob_safe(model_obj, X_df):
-    try:
-        pos = _positive_index(model_obj)
-        return float(model_obj.predict_proba(X_df)[0][pos])
-    except Exception:
-        try:
-            clf = model_obj.named_steps.get('classifier', None)
-            if clf is not None and hasattr(clf, 'predict_proba'):
-                pos = _positive_index(clf)
-                return float(clf.predict_proba(X_df)[0][pos])
-        except Exception:
-            pass
-        try:
-            val = float(model_obj.decision_function(X_df)[0])
-            val_c = max(min((val + 5.0) / 10.0, 1.0), 0.0)
-            return float(val_c)
-        except Exception:
-            try:
-                return float(_np.clip(float(model_obj.predict(X_df)[0]), 0.0, 1.0))
-            except Exception:
-                return 0.5
+    races = ["Mexican American", "Other Hispanic", "Non-Hispanic White", "Non-Hispanic Black", "Non-Hispanic Asian", "Other Race"]
+    race_one_hot = {}
+    for r in races:
+        key = "RIDRETH3_" + r.replace(" ", "_")
+        race_one_hot[key] = 1 if race == r else 0
 
-def render_risk_card(prob):
-    try:
-        p = float(prob)
-    except Exception:
-        p = 0.0
-    if p < 0.34:
-        label = 'Low'; color = '#22c55e'
-    elif p < 0.67:
-        label = 'Medium'; color = '#f59e0b'
-    else:
-        label = 'High'; color = '#ef4444'
-    html = (
-        '<div style="padding:16px;border-radius:10px;background:' + color + '1A;border:2px solid ' + color + ';margin:12px 0">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;font-size:1.05rem;">' +
-        '<div><b>Risk level:</b> ' + label + '</div>' +
-        '<div><b
+    out = {
+        "RIAGENDR": 1 if gender == "Male" else 2,
+        "RIDAGEYR": age,
+        "INDFMPIR": float(family_income_ratio),
+        "Is_Smoker_Cat": 1 if smoking_status == "Yes" else 0,
+        "SLD012": 1 if sleep_disorder == "Yes" else 0,
+        "SLQ050": float(sleep_hours),
+        "SLQ120": int(work
