@@ -1,4 +1,4 @@
-mport pandas as pd
+import pandas as pd
 import joblib
 import streamlit as st
 from datetime import datetime
