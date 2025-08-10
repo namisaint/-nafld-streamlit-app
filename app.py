@@ -8,14 +8,50 @@ import shap
 import matplotlib.pyplot as plt
 from fpdf import FPDF
 from io import BytesIO
+from pymongo.server_api import ServerApi
 
-st.set_page_config(page_title="NAFLD Lifestyle Risk Predictor", layout="wide")
-st.title("🤖 NAFLD Lifestyle Risk Predictor")
-st.caption("Enter values for the model features to get a prediction. Use the sidebar to connect to MongoDB and choose the model file.")
+# --- App Configuration ---
+st.set_page_config(
+    page_title="Dissertation Model Predictor",
+    page_icon="🤖",
+    layout="wide"
+)
 
 # Force Matplotlib to use Agg backend to prevent rendering issues in Streamlit
 plt.style.use('default')
 plt.switch_backend('Agg')
+
+# --- MongoDB Connection ---
+# The connection string is now read securely from st.secrets.
+try:
+    MONGODB_CONNECTION_STRING = st.secrets["mongo"]["connection_string"]
+    DB_NAME = st.secrets["mongo"]["db_name"]
+    COLLECTION_NAME = st.secrets["mongo"]["collection_name"]
+except KeyError:
+    st.error("MongoDB secrets are not configured. Please add your credentials to the Streamlit secrets.")
+    st.stop()
+
+@st.cache_resource
+def get_mongo_client():
+    """
+    Connects to the MongoDB Atlas cluster.
+    """
+    try:
+        client = MongoClient(MONGODB_CONNECTION_STRING, server_api=ServerApi('1'), tls=True, tlsCAFile=certifi.where())
+        client.admin.command('ping')
+        return client
+    except Exception as e:
+        st.error(f"Error connecting to MongoDB: {e}")
+        return None
+
+mongo_client = get_mongo_client()
+if mongo_client:
+    db = mongo_client[DB_NAME]
+    predictions_collection = db[COLLECTION_NAME]
+else:
+    st.error("Could not connect to the database. The app will not be able to save or load predictions.")
+    predictions_collection = None
+
 
 @st.cache_resource
 def load_model(path):
@@ -24,24 +60,6 @@ def load_model(path):
     except Exception as e:
         st.error("Error loading model: " + str(e))
         return None
-
-# Sidebar: Mongo
-with st.sidebar:
-    st.header("🍃 MongoDB Connection")
-    mongo_secrets = st.secrets.get("mongo", {})
-    cs_default = mongo_secrets.get("connection_string", "")
-    dbn_default = mongo_secrets.get("db_name", "nafld_db")
-    cs = st.text_input("Connection String", value=cs_default, type="password", key="mongo_uri_input")
-    dbn = st.text_input("Database Name", value=dbn_default, key="mongo_db_name_input")
-
-    if st.button("Connect"):
-        try:
-            client = MongoClient(cs, tls=True, tlsCAFile=certifi.where())
-            client.admin.command("ping")
-            st.session_state["mongo_db"] = client[dbn]
-            st.success("Connected to " + dbn)
-        except Exception as e:
-            st.error("Mongo connection failed: " + str(e))
 
 # Sidebar: Model file
 with st.sidebar:
@@ -60,7 +78,6 @@ except Exception:
         'ALQ151', 'ALQ170', 'Is_Smoker_Cat', 'SLQ050', 'SLQ120', 'SLD012', 'DR1TKCAL',
         'DR1TPROT', 'DR1TCARB', 'DR1TSUGR', 'DR1TFIBE', 'DR1TTFAT', 'PAQ620', 'BMXBMI'
     ]
-
 
 # Helpers for nicer output
 def risk_label(p):
@@ -209,7 +226,7 @@ if model is not None:
             pdf = create_pdf(full, prediction_probability, risk_label)
             st.download_button(
                 "Download Report",
-                data=pdf.output(dest="S").encode("latin-1"),
+                data=BytesIO(pdf.output(dest='S').encode("latin-1")),
                 file_name=f"NAFLD_Risk_Report_{datetime.now().strftime('%Y%m%d')}.pdf",
                 mime="application/pdf"
             )
@@ -226,7 +243,7 @@ if model is not None:
                 return shap.TreeExplainer(_model)
             
             explainer = get_explainer(model)
-            shap_values = explainer.shap_values(X)[1]
+            shap_values = explainer.shap_values(X)
             st.pyplot(shap.summary_plot(shap_values, X, plot_type="bar", show=False))
             
             st.markdown("---")
