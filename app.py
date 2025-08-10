@@ -87,7 +87,6 @@ def save_to_mongo(payload, pred, proba):
         st.error("Save failed: " + str(e))
 
 # --- UI
-st.title("🤖 NAFLD Lifestyle Risk Predictor")
 st.subheader("User Data Input")
 st.markdown("Enter values for the model's 21 features to get a prediction.")
 
