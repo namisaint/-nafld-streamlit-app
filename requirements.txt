@@ -1,8 +1,8 @@
-pymongo[srv]
-gridfs
-joblib
 streamlit
 pandas
 numpy
 scikit-learn
+joblib
+pymongo
+dnspython
 certifi
