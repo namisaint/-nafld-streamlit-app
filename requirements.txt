@@ -1,9 +1,12 @@
 streamlit
 pandas
+numpy
 scikit-learn
 joblib
-pymongo
-plotly
+pymongo[srv]
 certifi
 shap
+matplotlib
 fpdf
+plotly
+
