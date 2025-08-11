@@ -1,256 +1,224 @@
-# app.py
+# app.py — NAFLD Predictor (pipeline + GridFS)
 import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
+import io
 from datetime import datetime
 
+# Mongo / GridFS imports
+import certifi, gridfs
+from pymongo import MongoClient
+from pymongo.server_api import ServerApi
+
 st.set_page_config(page_title="NAFLD Predictor", page_icon="🤖", layout="wide")
-st.title("🤖 NAFLD Lifestyle Risk Predictor")
+st.title("🤖 NAFLD Lifestyle Risk Predictor (Pipeline from MongoDB)")
 
-# -----------------------
-# Constants: EXACT 21 FEATURES (order matters)
-# -----------------------
-EXPECTED_COLS = [
-    'RIAGENDR', 'RIDAGEYR', 'RIDRETH3', 'INDFMPIR',
-    'ALQ111', 'ALQ121', 'ALQ142', 'ALQ151', 'ALQ170',
-    'Is_Smoker_Cat',
-    'SLQ050', 'SLQ120', 'SLD012',
-    'DR1TKCAL', 'DR1TPROT', 'DR1TCARB', 'DR1TSUGR', 'DR1TFIBE', 'DR1TTFAT',
-    'PAQ620', 'BMXBMI'
-]
-
-# NHANES coding helpers
-RIDRETH3_CODE_MAP = {
-    "Mexican American": 1,
-    "Other Hispanic": 2,
-    "Non-Hispanic White": 3,
-    "Non-Hispanic Black": 4,
-    "Non-Hispanic Asian": 6,
-    "Other Race": 7
-}
-
-# -----------------------
-# Load model (cached)
-# -----------------------
+# =========================
+# Load model from MongoDB GridFS (cached)
+# =========================
 @st.cache_resource
-def load_model(path: str = "rf_lifestyle_model.pkl"):
-    return joblib.load(path)
+def load_model_from_gridfs():
+    if "mongo" not in st.secrets:
+        raise RuntimeError("Missing [mongo] in Streamlit secrets.")
+
+    uri = st.secrets["mongo"]["connection_string"]
+    model_db = st.secrets["mongo"].get("model_db_name", "NAFLD_Models")
+    bucket   = st.secrets["mongo"].get("model_bucket", "fs")  # you uploaded with GridFS(db) -> 'fs'
+    fname    = st.secrets["mongo"].get("model_filename", "rf_lifestyle_pipeline.pkl")
+
+    client = MongoClient(uri, server_api=ServerApi('1'), tls=True, tlsCAFile=certifi.where())
+    db = client[model_db]
+
+    fs = gridfs.GridFS(db, collection=bucket)
+    files_coll = db[f"{bucket}.files"]
+
+    doc = files_coll.find_one({"filename": fname}, sort=[("uploadDate", -1)])
+    if not doc:
+        raise FileNotFoundError(f"Model '{fname}' not found in GridFS bucket '{bucket}' (db='{model_db}').")
+
+    blob = fs.get(doc["_id"]).read()
+    model = joblib.load(io.BytesIO(blob))
+    return model, {"db": model_db, "bucket": bucket, "filename": fname, "uploadDate": doc.get("uploadDate")}
 
 try:
-    model = load_model()
+    model, model_info = load_model_from_gridfs()
 except Exception as e:
-    st.error(f"❌ Cannot load 'rf_lifestyle_model.pkl': {e}")
+    st.error(f"❌ Unable to load model from MongoDB GridFS: {e}")
     st.stop()
 
-# Optional sanity check against model.feature_names_in_
 with st.sidebar:
-    st.markdown("### Expected features (app)")
-    st.write(EXPECTED_COLS)
-    try:
-        model_cols = list(model.feature_names_in_)
-        st.markdown("### Features in model")
-        st.write(model_cols)
-        if model_cols != EXPECTED_COLS:
-            st.warning("Model feature list differs from app's 21 features. Predictions may error or be wrong.")
-    except Exception:
-        st.info("Model does not expose feature_names_in_ (ok if you saved only the estimator).")
+    st.markdown("### Model source")
+    st.write(model_info)
 
-# -----------------------
-# Optional: MongoDB via secrets
-# -----------------------
+# =========================
+# Optional: MongoDB collection for saving predictions
+# =========================
 HAS_MONGO = False
 predictions_collection = None
 mongo_status = "disabled"
 
 if "mongo" in st.secrets:
     try:
-        from pymongo.mongo_client import MongoClient
-        from pymongo.server_api import ServerApi
-        import certifi
+        uri = st.secrets["mongo"]["connection_string"]
+        log_db_name = st.secrets["mongo"].get("db_name", "nafld_app")
+        log_coll = st.secrets["mongo"].get("collection_name", "predictions")
 
         @st.cache_resource
-        def get_mongo_client():
-            conn = st.secrets["mongo"]["connection_string"]
-            client = MongoClient(conn, server_api=ServerApi('1'), tls=True, tlsCAFile=certifi.where())
-            client.admin.command("ping")
-            return client
+        def _get_client():
+            return MongoClient(uri, server_api=ServerApi('1'), tls=True, tlsCAFile=certifi.where())
 
-        _client = get_mongo_client()
-        _db = _client[st.secrets["mongo"]["db_name"]]
-        predictions_collection = _db[st.secrets["mongo"]["collection_name"]]
+        _client = _get_client()
+        _db = _client[log_db_name]
+        predictions_collection = _db[log_coll]
+        # Ping
+        _client.admin.command("ping")
         HAS_MONGO = True
-        mongo_status = "connected"
+        mongo_status = f"connected (db='{log_db_name}', coll='{log_coll}')"
     except Exception as e:
         mongo_status = f"error: {e}"
 
 with st.sidebar:
-    st.subheader("MongoDB")
-    st.success(f"MongoDB {mongo_status}") if HAS_MONGO else st.info(f"MongoDB {mongo_status}")
+    st.subheader("MongoDB logging")
+    (st.success if HAS_MONGO else st.info)(f"MongoDB {mongo_status}")
 
-# -----------------------
-# UI: Collect inputs for the 21 features
-# -----------------------
+# =========================
+# Inputs (21 human-readable features used in training)
+# =========================
+RAW_FEATURES = [
+    'Gender','Age in years','Race/Ethnicity','Family income ratio',
+    'Alcohol consumption (days/week)','Alcohol drinks per day',
+    'Number of days drank in the past year','Max number of drinks on any single day',
+    'Alcohol intake frequency (drinks/day)','Smoking status',
+    'Sleep duration (hours/day)','Work schedule duration (hours)','Sleep Disorder Status',
+    'Total calorie intake (kcal)','Total protein intake (grams)','Total carbohydrate intake (grams)',
+    'Total sugar intake (grams)','Total fiber intake (grams)','Total fat intake (grams)',
+    'Physical activity (minutes/day)','BMI'
+]
+
 st.header("Inputs")
 
 c1, c2, c3 = st.columns(3)
-
 with c1:
-    gender_ui = st.selectbox("Gender", ["Male", "Female"], index=0)
-    age_ui = st.slider("Age in years (RIDAGEYR)", 0, 120, 40, 1)
-    race_ui = st.selectbox(
-        "Race/Ethnicity (RIDRETH3)",
-        list(RIDRETH3_CODE_MAP.keys()),
-        index=2
-    )
-    income_ui = st.slider("Family income ratio (INDFMPIR)", 0.0, 10.0, 2.0, 0.1)
-    smoker_ui = st.selectbox("Smoking status (Is_Smoker_Cat)", ["No", "Yes"], index=0)
+    gender = st.selectbox("Gender", ["Male","Female"], index=0)
+    age = st.slider("Age in years", 0, 120, 40, 1)
+    race = st.selectbox("Race/Ethnicity", [
+        "Mexican American","Other Hispanic","Non-Hispanic White",
+        "Non-Hispanic Black","Non-Hispanic Asian","Other Race"
+    ], index=2)
+    income = st.slider("Family income ratio", 0.0, 10.0, 2.0, 0.1)
+    smoker = st.selectbox("Smoking status", ["No","Yes"], index=0)
 
 with c2:
-    sleep_hours_ui = st.slider("Sleep duration hours/day (SLQ050)", 0.0, 24.0, 8.0, 0.25)
-    work_hours_ui = st.slider("Work schedule duration hours (SLQ120)", 0, 24, 8, 1)
-    sleep_disorder_ui = st.selectbox("Sleep Disorder Status (SLD012)", ["No", "Yes"], index=0)
-    pa_mins_ui = st.slider("Physical activity minutes/day (PAQ620)", 0, 1440, 30, 5)
-    bmi_ui = st.slider("BMI (BMXBMI)", 10.0, 60.0, 25.0, 0.1)
+    sleep_hours = st.slider("Sleep duration (hours/day)", 0.0, 24.0, 8.0, 0.25)
+    work_hours = st.slider("Work schedule duration (hours)", 0, 24, 8, 1)
+    sleep_disorder = st.selectbox("Sleep Disorder Status", ["No","Yes"], index=0)
+    pa_mins = st.slider("Physical activity (minutes/day)", 0, 1440, 30, 5)
+    bmi = st.slider("BMI", 10.0, 60.0, 25.0, 0.1)
 
 with c3:
-    alq111_ui = st.slider("ALQ111: Alcohol days/week", 0, 7, 0, 1)
-    alq121_ui = st.slider("ALQ121: Alcohol drinks/day", 0, 50, 0, 1)
-    alq142_ui = st.slider("ALQ142: Days drank in past year", 0, 366, 0, 1)
-    alq151_ui = st.slider("ALQ151: Max drinks on any day", 0, 50, 0, 1)
-    alq170_ui = st.slider("ALQ170: Intake freq (drinks/day)", 0.0, 50.0, 0.0, 0.1)
+    alq111 = st.slider("Alcohol consumption (days/week)", 0, 7, 0, 1)
+    alq121 = st.slider("Alcohol drinks per day", 0, 50, 0, 1)
+    alq142 = st.slider("Number of days drank in the past year", 0, 366, 0, 1)
+    alq151 = st.slider("Max number of drinks on any single day", 0, 50, 0, 1)
+    alq170 = st.slider("Alcohol intake frequency (drinks/day)", 0.0, 50.0, 0.0, 0.1)
 
 st.subheader("Nutrition")
 n1, n2, n3 = st.columns(3)
 with n1:
-    kcal_ui = st.slider("DR1TKCAL: Total kcal", 0, 10000, 2000, 50)
-    prot_ui = st.slider("DR1TPROT: Protein (g)", 0, 500, 60, 5)
+    kcal = st.slider("Total calorie intake (kcal)", 0, 10000, 2000, 50)
+    prot = st.slider("Total protein intake (grams)", 0, 500, 60, 5)
 with n2:
-    carb_ui = st.slider("DR1TCARB: Carbs (g)", 0, 1000, 250, 5)
-    sug_ui = st.slider("DR1TSUGR: Sugar (g)", 0, 1000, 40, 5)
+    carb = st.slider("Total carbohydrate intake (grams)", 0, 1000, 250, 5)
+    sug = st.slider("Total sugar intake (grams)", 0, 1000, 40, 5)
 with n3:
-    fib_ui = st.slider("DR1TFIBE: Fiber (g)", 0, 500, 30, 1)
-    fat_ui = st.slider("DR1TTFAT: Fat (g)", 0, 500, 70, 1)
+    fib = st.slider("Total fiber intake (grams)", 0, 500, 30, 1)
+    fat = st.slider("Total fat intake (grams)", 0, 500, 70, 1)
 
-# -----------------------
-# Build the row EXACTLY in EXPECTED_COLS order
-# -----------------------
 row = {
-    'RIAGENDR': 1 if gender_ui == "Male" else 2,
-    'RIDAGEYR': int(age_ui),
-    'RIDRETH3': int(RIDRETH3_CODE_MAP[race_ui]),
-    'INDFMPIR': float(income_ui),
-
-    'ALQ111': int(alq111_ui),
-    'ALQ121': int(alq121_ui),
-    'ALQ142': int(alq142_ui),
-    'ALQ151': int(alq151_ui),
-    'ALQ170': float(alq170_ui),
-
-    'Is_Smoker_Cat': 1 if smoker_ui == "Yes" else 0,
-
-    'SLQ050': float(sleep_hours_ui),
-    'SLQ120': int(work_hours_ui),
-    'SLD012': 1 if sleep_disorder_ui == "Yes" else 0,
-
-    'DR1TKCAL': int(kcal_ui),
-    'DR1TPROT': int(prot_ui),
-    'DR1TCARB': int(carb_ui),
-    'DR1TSUGR': int(sug_ui),
-    'DR1TFIBE': int(fib_ui),
-    'DR1TTFAT': int(fat_ui),
-
-    'PAQ620': int(pa_mins_ui),
-    'BMXBMI': float(bmi_ui),
+    'Gender': gender,
+    'Age in years': age,
+    'Race/Ethnicity': race,
+    'Family income ratio': income,
+    'Alcohol consumption (days/week)': alq111,
+    'Alcohol drinks per day': alq121,
+    'Number of days drank in the past year': alq142,
+    'Max number of drinks on any single day': alq151,
+    'Alcohol intake frequency (drinks/day)': alq170,
+    'Smoking status': smoker,
+    'Sleep duration (hours/day)': sleep_hours,
+    'Work schedule duration (hours)': work_hours,
+    'Sleep Disorder Status': sleep_disorder,
+    'Total calorie intake (kcal)': kcal,
+    'Total protein intake (grams)': prot,
+    'Total carbohydrate intake (grams)': carb,
+    'Total sugar intake (grams)': sug,
+    'Total fiber intake (grams)': fib,
+    'Total fat intake (grams)': fat,
+    'Physical activity (minutes/day)': pa_mins,
+    'BMI': bmi
 }
+X = pd.DataFrame([row], columns=RAW_FEATURES)
 
-# Force correct order/columns (and only these 21)
-X = pd.DataFrame([row], columns=EXPECTED_COLS)
-
-# -----------------------
+# =========================
 # Predict
-# -----------------------
+# =========================
 st.header("Prediction")
 
-def positive_class_index(classes):
+def _pos_idx(classes):
     try:
         if 1 in classes: return list(classes).index(1)
         if True in classes: return list(classes).index(True)
         if "1" in classes: return list(classes).index("1")
-        # fall back: largest numeric as positive
-        nums = [float(c) for c in classes]
-        return int(np.argmax(nums))
+        nums = [float(c) for c in classes]; return int(np.argmax(nums))
     except Exception:
-        return 1 if len(classes) > 1 else 0
+        return 1 if classes is not None and len(classes) > 1 else 0
 
 try:
     if hasattr(model, "predict_proba"):
         probs = model.predict_proba(X)
-        classes = getattr(model, "classes_", [0, 1])
-        pos_idx = positive_class_index(classes)
-        proba = float(probs[0][pos_idx])
-        yhat = int(model.predict(X)[0]) if hasattr(model, "predict") else (1 if proba >= 0.5 else 0)
+        classes = getattr(model, "classes_", [0,1])
+        proba = float(probs[0][_pos_idx(classes)])
+        yhat = int(model.predict(X)[0]) if hasattr(model, "predict") else int(proba >= 0.5)
     else:
-        y_arr = model.predict(X) if hasattr(model, "predict") else [0]
-        yhat = int(y_arr[0])
-        proba = float(yhat)
+        yhat = int(model.predict(X)[0]); proba = float(yhat)
 except Exception as e:
     st.error(f"❌ Prediction error: {e}")
-    st.write("Inputs sent to model (debug):")
-    st.dataframe(X.T.rename(columns={0: "value"}))
+    st.write("Inputs sent:", X.T.rename(columns={0:'value'}))
     st.stop()
 
-risk_pct = proba * 100.0
-risk_label = "High Risk" if risk_pct >= 70 else "Moderate Risk" if risk_pct >= 30 else "Low Risk"
-risk_color = "red" if risk_pct >= 70 else "orange" if risk_pct >= 30 else "green"
+risk_pct = proba * 100
+label = "High Risk" if risk_pct >= 70 else "Moderate Risk" if risk_pct >= 30 else "Low Risk"
+st.markdown(f"### Predicted NAFLD Risk: **{risk_pct:.2f}% ({label})**")
+st.progress(min(max(risk_pct/100, 0), 1))
+st.write("**Inputs sent to the model:**")
+st.dataframe(X.T.rename(columns={0:'value'}))
 
-colA, colB = st.columns([3, 2])
-with colA:
-    st.markdown(
-        f"### Predicted NAFLD Risk: **<span style='color:{risk_color}'>{risk_pct:.2f}% ({risk_label})</span>**",
-        unsafe_allow_html=True
-    )
-    st.progress(min(max(risk_pct/100.0, 0.0), 1.0))
-with colB:
-    st.write("**Inputs sent to the model (exact columns):**")
-    st.dataframe(X.T.rename(columns={0: "value"}))
-
-# -----------------------
-# Save to MongoDB (optional)
-# -----------------------
+# =========================
+# Save to MongoDB (optional logging)
+# =========================
 def save_prediction(doc):
     if not HAS_MONGO or predictions_collection is None:
-        return False, "Mongo not configured"
+        return False, "Mongo not configured for logging"
     try:
-        predictions_collection.insert_one(doc)
-        return True, "Saved"
+        predictions_collection.insert_one(doc); return True, "Saved"
     except Exception as e:
         return False, str(e)
 
 with st.sidebar:
     st.markdown("---")
     if st.button("Save this prediction"):
-        doc = {
+        ok, msg = save_prediction({
             "_created_at": datetime.utcnow(),
             "inputs": X.iloc[0].to_dict(),
             "label": int(yhat),
-            "probability": float(proba),
-        }
-        ok, msg = save_prediction(doc)
-        if ok:
-            st.success("Saved to MongoDB")
-        else:
-            st.error(f"Could not save: {msg}")
-
+            "probability": float(proba)
+        })
+        (st.success if ok else st.error)(msg)
     if HAS_MONGO and st.button("Show last 10 saved"):
         try:
-            rows = list(predictions_collection.find().sort("_created_at", -1).limit(10))
-            import pandas as _pd
-            if rows:
-                for r in rows:
-                    r.pop("_id", None)
-                st.dataframe(_pd.DataFrame(rows))
-            else:
-                st.info("No saved records yet.")
+            rows = list(predictions_collection.find().sort("_created_at",-1).limit(10))
+            for r in rows: r.pop("_id", None)
+            st.dataframe(pd.DataFrame(rows) if rows else pd.DataFrame([]))
         except Exception as e:
             st.error(f"Read error: {e}")
